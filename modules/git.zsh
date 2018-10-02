@@ -1,5 +1,19 @@
 #!/usr/bin/env zsh
 
+# All of the expensive calls rolled into one method
+
+fplib-is_git() command git rev-parse --show-toplevel > /dev/null 2>&1
+fplib-git() {
+    set -x
+    declare -g  PWD_CLOSEST_REPO_ROOT='' PWD_REPO_{LOCAL,REMOTE}_BRANCH='' PWD_GIT_REV=''
+    declare -gi PWD_IS_GIT_REPO=0;
+    local -a git_status=( "${(f)$(command git rev-parse HEAD --show-toplevel 2>/dev/null && command git status --porcelain -b 2>/dev/null)}" )
+
+    PWD_REPO_LOCAL_BRANCH="${${${git_status[3]}%%...*}##\#\# }"
+    PWD_REPO_REMOTE_BRANCH="${${git_status[3]}##*...}"
+    PWD_GIT_REV="${${git_status[1]}:0:7}"
+    [[ "$PWD_REPO_LOCAL_BRANCH" != "$PWD_REPO_REMOTE_BRANCH" ]] || PWD_REPO_REMOTE_BRANCH=''
+}
 plib_is_git(){
   if [[ $(\git branch 2>/dev/null) != "" ]]; then
     echo -n 1
@@ -45,17 +59,17 @@ plib_git_dirty(){
   [[ -z "${PLIB_GIT_DEL_SYM}" ]] && PLIB_GIT_DEL_SYM=-
   [[ -z "${PLIB_GIT_MOD_SYM}" ]] && PLIB_GIT_MOD_SYM=⭑
   [[ -z "${PLIB_GIT_NEW_SYM}" ]] && PLIB_GIT_NEW_SYM=?
-  
+
   __git_st=$(\git status --porcelain 2>/dev/null)
-  
+
   __mod_t=$(echo ${__git_st} | grep '^M[A,M,D,R, ]\{1\} \|^R[A,M,D,R, ]\{1\} ' | wc -l | tr -d ' ');
   __add_t=$(echo ${__git_st} | grep '^A[A,M,D,R, ]\{1\} ' | wc -l | tr -d ' ');
   __del_t=$(echo ${__git_st} | grep '^D[A,M,D,R, ]\{1\} ' | wc -l | tr -d ' ');
-  
+
   __mod_ut=$(echo ${__git_st} | grep '^[A,M,D,R, ]\{1\}M \|^[A,M,D,R, ]\{1\}R ' | wc -l | tr -d ' ');
   __add_ut=$(echo ${__git_st} | grep '^[A,M,D,R, ]\{1\}A ' | wc -l | tr -d ' ');
   __del_ut=$(echo ${__git_st} | grep '^[A,M,D,R, ]\{1\}D ' | wc -l | tr -d ' ');
-  
+
   __new=$(echo ${__git_st} | grep '^?? ' | wc -l | tr -d ' ');
 
   [[ "$__add_t" != "0" ]]  && echo -n " %F{$PLIB_GIT_TRACKED_COLOR}${PLIB_GIT_ADD_SYM}%f";
