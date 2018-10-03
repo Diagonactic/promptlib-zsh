@@ -3,24 +3,68 @@
 # All of the expensive calls rolled into one method
 
 fplib-is_git() command git rev-parse --show-toplevel > /dev/null 2>&1
-fplib-git() {
+fplib-git-repo_property_map() {
+    get-gitcommands() {
+        command git remote -v 2>/dev/null || { return 1 }
+        print -- '--'
+        command git rev-parse HEAD --show-toplevel 2>/dev/null || {
+            print -- 'detached'
+            git rev-parse --show-toplevel 2>/dev/null || {
+                print -- 'not initialized'
+                return 1
+            }
+        }
+        print -- $'--\n--'
+        command git status --porcelain -b
+    }
     set -x
-    declare -g  PWD_CLOSEST_REPO_ROOT='' PWD_REPO_{LOCAL,REMOTE}_BRANCH='' PWD_GIT_REV=''
-    declare -gi PWD_IS_GIT_REPO=0;
-    local -a git_status=( "${(f)$(command git rev-parse HEAD --show-toplevel 2>/dev/null && command git status --porcelain -b 2>/dev/null)}" )
+    typeset -ga git_output=( )
+    () {
+        typeset -gxa git_remotes=( "${(@)${(@)argv[1,$(( ${argv[(i)--]} - 1 ))]}[@]}" )
+        shift $(( ${#git_remotes[@]} + 1 ))
+        typeset -gxa git_props=( "${(@)${(@)argv[1,$(( ${argv[(i)--]} - 1 ))]}[@]}" )
+        shift $(( ${#git_props[@]} + 2 ))
+        typeset -gxa git_status=( "$@" )
+    } "${(f)$(get-gitcommands)}"
+    (( $? == 0 )) || return 1
 
-    PWD_REPO_LOCAL_BRANCH="${${${git_status[3]}%%...*}##\#\# }"
-    PWD_REPO_REMOTE_BRANCH="${${git_status[3]}##*...}"
-    PWD_GIT_REV="${${git_status[1]}:0:7}"
-    [[ "$PWD_REPO_LOCAL_BRANCH" != "$PWD_REPO_REMOTE_BRANCH" ]] || PWD_REPO_REMOTE_BRANCH=''
+    local -r REPO_CONFIG="${${(M)git_status[@]:#\#*}##\#\# }"
+
+    local -A prop_map=(
+        'nearest-repo-root' "${git_props[2]}"
+        'git-rev'           "${git_props[1]}"
+        'local-branch'      "${REPO_CONFIG%%...*}"
+        'remote-branch'     "${REPO_CONFIG##*...}"
+    )
+
+  #     [[ "$__add_t" != "0" ]]  && echo -n " %F{$PLIB_GIT_TRACKED_COLOR}${PLIB_GIT_ADD_SYM}%f";
+  # [[ "$__add_ut" != "0" ]] && echo -n " %F{$PLIB_GIT_UNTRACKED_COLOR}${PLIB_GIT_ADD_SYM}%f";
+  # [[ "$__mod_t" != "0" ]]  && echo -n " %F{$PLIB_GIT_TRACKED_COLOR}${PLIB_GIT_MOD_SYM}%f";
+  # [[ "$__mod_ut" != "0" ]] && echo -n " %F{$PLIB_GIT_UNTRACKED_COLOR}${PLIB_GIT_MOD_SYM}%f";
+  # [[ "$__del_t" != "0" ]]  && echo -n " %F{$PLIB_GIT_TRACKED_COLOR}${PLIB_GIT_DEL_SYM}%f";
+  # [[ "$__del_ut" != "0" ]] && echo -n " %F{$PLIB_GIT_UNTRACKED_COLOR}${PLIB_GIT_DEL_SYM}%f";
+  # [[ "$__new" != "0" ]]    && echo -n " %F{$PLIB_GIT_UNTRACKED_COLOR}${PLIB_GIT_NEW_SYM}%f";
+
+
+    typeset -ga u_ren=( ${(@)${(M)git_status:#([AMDR ]R *)}##???} )  \
+             u_mod=( ${(@)${(M)git_status:#([AMDR ]M *)}##???} )  \
+             u_add=( ${(@)${(M)git_status:#([AMDR ]A *)}##???} )  \
+             u_del=( ${(@)${(M)git_status:#([AMDR ]D *)}##???} )  \
+             u_new=( ${(@)${(M)git_status:#\?\?*}##???} )         \
+             s_mod=( ${(@)${(M)git_status:#R[AMDR ] *}##???} ) \
+             s_ren=( ${(@)${(M)git_status:#M[AMDR ] *}##???} ) \
+             s_add=( ${(@)${(M)git_status:#A[AMDR ] *}##???} )    \
+             s_del=( ${(@)${(M)git_status:#D[AMDR ] *}##???} )
+    local RP=''
+    for RP in u_{ren,mod,add,del,new}; do repo_status_unstaged+=( "${RP##u_}-paths"  "${(j.:.)${(q@)${(P@)RP}}}" "${RP##u_}-len" ${#${(P@)RP}} ); done
+    for RP in s_{ren,mod,add,del}; do repo_status_staged+=( "${RP##s_}-paths"  "${(j.:.)${(q@)${(P@)RP}}}" "${RP##s_}-len" ${#${(P@)RP}} ); done
+
+    ___A=" %F{$PLIB_GIT_TRACKED_COLOR}${PLIB_GIT_MOD_SYM}%f"
+    ____F="${${(M)repo_status_unstaged[mod-len]:#[123456789]*}:+$___A}"
 }
-plib_is_git(){
-  if [[ $(\git branch 2>/dev/null) != "" ]]; then
-    echo -n 1
-  else
-    echo -n 0
-  fi
-}
+
+plib_is_git() print -n -- ${${$(\git branch 2>/dev/null):+1}:-0}
+plib_git_remote_defined() print -n -- ${${$(\git remote -v 2>/dev/null):+1}:-0}
 
 plib_git_branch(){
   __ref=$(\git symbolic-ref HEAD 2> /dev/null) || __ref="detached" || return;
@@ -34,13 +78,7 @@ plib_git_rev(){
   unset __rev;
 }
 
-plib_git_remote_defined(){
-  if [ ! -z "`\git remote -v | head -1 | awk '{print $1}' | tr -d ' \n'`" ]; then
-    echo -ne 1
-  else
-    echo -ne 0
-  fi
-}
+
 
 plib_git_remote_name(){
   if \git remote -v | grep origin > /dev/null; then
@@ -83,7 +121,7 @@ plib_git_dirty(){
   unset __mod_ut __new_ut __add_ut __mod_t __new_t __add_t __del
 }
 
-plib_git_left_right(){
+lplib_git_left_right(){
   [[ -z "${PLIB_GIT_PUSH_SYM}" ]] && PLIB_GIT_PUSH_SYM=↑
   [[ -z "${PLIB_GIT_PULL_SYM}" ]] && PLIB_GIT_PULL_SYM=↓
   if [[ "$(plib_git_remote_defined)" == 1 ]]; then
