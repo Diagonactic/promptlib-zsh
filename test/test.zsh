@@ -1,4 +1,6 @@
 #!/bin/zsh
+zmodload zsh/parameter
+
 # *-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*
 # test.zsh
 # ----------------------------------------------------------------------------------------------------------: Description :
@@ -18,6 +20,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 # *-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*
+typeset -g TEST_LIB_PATH="${${${(%):-%x}:A}:h}"
 ___test_arg="$1"
 __ut/escape_ans() { set +x
     print -r -- "${${1//$'\e'/\\e}//$'\n'/\\n}";
@@ -88,7 +91,7 @@ __ut/hr() {
     printf -v _hr "%*s" $COLUMNS && print -n -- "\n\e[0;37m${_hr// /━}" && print -- "\r\e[2C\e[1;97m ::: \e[0;90m[ \e[0;37m$1 ] \e[1;97m ::: \n"
 }
 __ut/die_usage() {
-    1="${1-1}"
+    1="${1:-1}"
     [[ "$1" =~ "^[0-9]+$" ]] && { stack_rewind="$1"; shift } || stack_rewind="$1"
     local stack_rewind="${1:-1}"
     local _hr=''; printf -v _hr "%*s" $COLUMNS && print -n -- "\n\e[0;37m${_hr// /━}" && print -- "\r\e[2C\e[1;97m ::: \e[0;90m[ \e[0;37mUsage Error ] \e[1;97m ::: \n"
@@ -160,8 +163,10 @@ __dump_array() {
     #done
 }
 __dump_assoc() {
+
     local -i color=$1; local varname="$2"; shift 2
-    local -A assoc=( "${argv[@]}" )
+    (( $# == 0 )) && assoc=( "${(kv@)${(kvP)varname}}" ) || assoc=( "${argv[@]}" )
+
 
     printf "      \033[1;9${color}m${varname}[%s]\e[1;3${color}m=\e[4;9${color}m%s\e[0;3${color}m\n" "${(kv)assoc[@]}"
 }
@@ -261,12 +266,12 @@ function assert/{scalar,integer,float,array,association} {
             if (( ___has_failed )); then
                 __print_fail "Association '$___association_name' keys/values do not match:"
                 print "$___MSG"
-                __ut/clip/association/assertion -s -- "$___association_name"
+                __ut/clip/association/assertion "$___association_name"
                 print -- $'\n\t\t\e[1;95mAn assertion statement that would pass has been copied to the clipboard\e[0;37m'
                 exit 1
                 exit 1;
             fi
-            __success "Association is equal to expected keys/values"
+            __success $'\e[0m'"Association "$'\e[4m'"$___association_name"$'\e[0m'", equal to expected keys/values"
         }
         local -A ___actual_value=( "${(kvP@)1}" )
 
@@ -354,10 +359,11 @@ function assert/{scalar,integer,float,array,association} {
 }
 
 __ut/center() {
-    if (( $# == 1 )); then 2=' '; fi
+    if (( $# == 1 )); then 2='='; fi
     local -i LLEN=$(( ( COLUMNS + ${#1} ) / 2 ))
     local -i RLEN=$(( ( COLUMNS - ${#1} ) / 2 ))
-    print "${(l.$LLEN..=.)1}${(r:$RLEN::=:)}"
+    local RV="${(l.$LLEN..╳.)1}${(r.$RLEN..╳.)}"
+    IFS="$2" print -- "${RV//╳/$2}"
 }
 alias __ut:switches='local {SWITCH_CONFIG,OPT,OPTARG}=""; local -i OPTIND=0; () { SWITCH_CONFIG="$1" }'
 alias __ut:to_clip:switches='local -i SILENT=0; local {HEADING,BOT_HEADING}=""; local -a ___ut_new_args=( "$@" ); __ut/to_clip-switch_helper "$@"; argv=( "${___ut_new_args[@]}" )'
@@ -385,22 +391,69 @@ __ut/to_clip() {
     "$@" | xclip -in -selection clipboard
     __ut:to_clip:noisy "$@"
 }
+__ut/debug_maps() {
+    typeset -ga call_stack=( "${funcstack[@]}" )                call_relative_lines=( "${functrace[@]##*:}" )  \
+                call_source_files=( "${funcfiletrace[@]%%:*}" ) call_source_lines=( "${funcfiletrace[@]##*:}" )
+    local -i i=1;
+    for i in {1..${#call_source_files[@]}}; do
+        call_source_files[$i]="${${:-"$TEST_LIB_PATH/${call_source_files[$i]}"}:A}"
+    done
+    # print -- "${#call_stack[@]} ${#call_relative_lines[@]} ${#call_source_files} ${#call_source_lines}"
+    typeset -gA call_func_line_map=( "${${call_stack[@]:^call_relative_lines}[@]}" )
+    typeset -gA call_file_line_map=( "${${call_stack[@]:^call_source_lines}[@]}" )
+    typeset -gA call_file_map=( "${${call_stack[@]:^call_source_files}[@]}" )
+}
+alias __ut:debug_maps='local -a call_stack=( ) call_relative_lines=( ) call_source_files=( ) call_source_lines=( ); local -A call_func_line_map=( ) call_file_line_map=( ) call_file_map=( ); __ut/debug_maps'
+
+__ut/debug_call_details() {
+    set -x
+    create-from-ix() {
+        local FFTRACE="$TEST_LIB_PATH${funcfiletrace[$1]}" FTRACE="${functrace[$1]}"
+        typeset -gA call_details=(
+            file      "${FFTRACE%%:*}"
+            fn        "${funcstack[$1]}"
+            file-line "${FTRACE##*:}"
+            fn-line   "${FTRACE##*:}"
+        )
+    }
+    if (( $# > 0 )); then
+
+    fi
+    [[ "$1" =~ "^[-]?[0-9]+$" ]] && local -ir IX=$1 || local -ir IX="${funcstack[(i)$1]}"
+    (( IX <= ${#funcstack[@]} )) || return 1
+    create-from-ix "$IX"
+}
+alias __ut:debug_call_details='local -A call_details=( ); __ut/debug_call_details'
+__ut/dump_declare() {
+    get-typeset() { (( $# == 0 )) && typeset || { typeset | grep "$1"; }; }
+    format-out() {
+        print -- "${1%%=*}"
+    }
+    get-text() {
+        local LINE;
+        while read LINE; do
+            format-out "$LINE"
+        done < <(get-typeset "$@")
+    }
+    get-text "$@" | column -t | less
+}
 __ut/clip/association/assertion() {
     __ut:to_clip:switches
     get_stmt() {
+        print -l -- "${${functrace[@]:^^funcfiletrace}[@]}"
         print "assert/association \"$1\" is-equal-to \\"
         shift
-
+        __ut:debug_call_details 6
+        __dump_declare
         if (( $# % 2 != 0 )); then print -- "Can't create assertion for $1!" > /dev/stderr; return 1; fi
         local -A assoc=( "$@" );
         local -a keys=( "${(q@)${(k@)assoc[@]}}" ) vals=( "${(qqv@)assoc[@]}" ) ordered_keys=( ${(ok@)assoc[@]} )
 
-        local -ir kw="${#${(O@)keys//?/X}[1]}" vw="${#${(O@)vals//?/X}[1]}"
+        local -ir kw="${#${(O@)keys//?/X}[1]}" vw=$(( ${#${(O@)vals//?/X}[1]} + 1 ))
         local -i ct=1
         local pargs=( "-n" -- )
         local {KEY,PAD,ENDC}='';
         for KEY in "${ordered_keys[@]}"; do
-
             if (( ct % 2 == 0 )); then
                 PAD=''; ENDC=$'\\\\\n'
             else
@@ -408,7 +461,7 @@ __ut/clip/association/assertion() {
             fi
             if (( ct == ${#keys[@]} )); then ENDC=$'\n'; fi
             set +x
-            print ${pargs[@]} "$PAD${(r:$kw:: :)${(q)KEY}} ${(r:$vw:: :)${(qq)assoc[$KEY]}}$ENDC"
+            print ${pargs[@]} "$PAD${(r:$kw:)${(q)KEY}} ${(r:$vw:: :)${(qq)assoc[$KEY]}}$ENDC"
             (( ct++ ))
         done
     }
