@@ -1,7 +1,7 @@
 #!/usr/bin/env zsh
 
 # All of the expensive calls rolled into one method
-print -- "${0}"
+
 fplib-is_git() command git rev-parse --show-toplevel > /dev/null 2>&1
 
 local ___AR="git_reomtes=( ) git_status=( )" ___AS="git_property_map=( ) repo_status_unstaged=( ) repo_status_staged=( )"
