@@ -1,5 +1,5 @@
 #!/usr/bin/env zsh
-source /home/acousticiris/.zplugin/plugins/zdharma---zui/zui.plugin.zsh
+#source /home/acousticiris/.zplugin/plugins/zdharma---zui/zui.plugin.zsh
 
 zmodload zsh/parameter
 setopt extendedglob
@@ -54,7 +54,8 @@ function print-it() {
 
 function a() {
 	function b() {
-		source "${${${(%):-%x}:h}:A}/test/playground-2.zsh"
+		if [[ "$PWD" != "${${${(%):-%x}:h}:A}" ]]; cd "${${${(%):-%x}:h}:A}"
+		source "test/playground-2.zsh"
 
 		#print-it association functions
 		#print-it association aliases
