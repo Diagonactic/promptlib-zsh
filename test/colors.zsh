@@ -21,14 +21,23 @@ init() {
 	global-attr() {
 
 		combined-has-key() {
+			key-matches() {
+				local -a has_key_pt=( "${(oi@s<->)1}" )
+				for KEYPART in "${key_pt[@]}"; do
+					(( ${has_key_pt[(i)$KEYPART]} <= ${#has_key_pt[@]} )) || return 1
+				done
+			}
 			local -a key_pt=( "${(oi@s<->)1}" ) has_key_pt=( )
 			local KEY='' KEYPART=''
+			local -a ac=( "${attr_combinations[@]}" )
 			for KEY in ${attr_combinations[@]}; do
-				has_key_pt=( "${(oi@s<->)KEY}" )
+
+				if key-matches
 				for KEYPART in "${key_pt[@]}"; do
-					(( ${has_key_pt[(i)$KEYPART]} <= "${#has_key_pt[@]}" )) || return 1
+					if ; then return 1; fi
 				done
 			done
+			return 1
 		}
 		combine-attrs() {
 			contains-keys() {
@@ -59,12 +68,14 @@ init() {
 		for KEY in "${(k)attr[@]}"; do
 			for XKEY in "${(@)${(k)attr[@]}:#$KEY}"; do
 				if combined-has-key "$KEY-$XKEY"; then continue; fi
-				CT="${#attr_combinations[@]}"
-				TEST="$XKEY-$KEY"
-				if (( ${attr_combinations[(i)$TEST]} <= $CT )); then continue; fi
-				TEST="$KEY-$XKEY"
-				if (( ${attr_combinations[(i)$TEST]} <= $CT )); then continue; fi
 				attr_combinations+=( "$KEY-$XKEY" )
+
+				# CT="${#attr_combinations[@]}"
+				# TEST="$XKEY-$KEY"
+				# if (( ${attr_combinations[(i)$TEST]} <= $CT )); then continue; fi
+				# TEST="$KEY-$XKEY"
+				# if (( ${attr_combinations[(i)$TEST]} <= $CT )); then continue; fi
+				# attr_combinations+=( "$KEY-$XKEY" )
 			done
 		done
 		set +x
