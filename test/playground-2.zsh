@@ -116,8 +116,8 @@ function print-it() {
 	function print-as-{con,piped,json} {
 
 		if [[ "$VAR_TYPE" == (array|association) ]]; then
-			local -i MAX_WID=$(( ${#${(O@)keys//?/X}[1]} + 1 ))
-			(( MAX_WID % 2 == 0 )) && integer -r HLF_WID=$(( MAX_WID / 2 )) || {
+			local -i MAX_WID=$(( ${#${(O@)keys//?/X}[1]} + 2 ))
+			(( MAX_WID % 2 == 0 )) && integer -r HLF_WID=$(( MAX_WID / 2  )) || {
 				(( MAX_WID >= $COLUMNS )) && integer -r HLF_WID=$(( MAX_WID / 2 + 1 )) || integer -r HLF_WID=$(( MAX_WID / 2 - 1 ))
 			}
 		fi
@@ -127,9 +127,9 @@ function print-it() {
 			;|
 			(con)	if [[ "$VAR_TYPE" == (array|association) ]]; then
 						for KEY in ${keys[@]}; do
-							print -n -- $'    \e[0;37m'"$VAR_NAME"$'\e[1;90m[\e[97m'"${(l<$MAX_WID>)${(l.$HLF_WID.r.$HLF_WID.)KEY}}"$'\e[90m]\e[0;37m=\e[1;97m'
+							print -n -- $'    \e[0;37m'"$VAR_NAME"$'\e[1;90m[\e[97m'"${(l<$MAX_WID>)${(l<$HLF_WID>r<$HLF_WID>)KEY}}"$'\e[90m]\e[0;37m=\e[1;97m'
 							() {
-								print -r -- "${1}"$'\e[0;37m'; shift
+								print -r -- "${(V)1}"$'\e[0;37m'; shift
 								(( $# > 1 )) || return 0
 								while (( $# > 0 )); do
 									print -r -- "$PAD"$'\e[0m\e[37m=\e[1;97m'"$1"$'\e[0m\e[37m'
@@ -240,7 +240,6 @@ function collect-trace() {
 	print -- ".. $(( ${funcsourcetrace[1]##*:} + $LINENO )) .."
 	print -l -- "${funcsourcetrace[@]}"
 }
-
 function a() {
 	function b() {
 		local -A scalar_parameter_value_map=(  )
@@ -254,10 +253,10 @@ function a() {
 				scalar_parameter_value_map[$KEY]="${parameters[$KEY]}"
 			fi
 		done
-		print-it association scalar_parameter_value_map
-		print-it array funcsourcetrace
-		print-it array funcfiletrace
-		print-it association termcap  | less
+		#print-it association scalar_parameter_value_map | less
+		#print-it array funcsourcetrace
+		#print-it array funcfiletrace
+		#print-it association termcap  | less
 		print-it association terminfo | less
 		print "${${(%):-%x}:A:h}"
 		#print -P %x
