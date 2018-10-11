@@ -116,7 +116,7 @@ function print-it() {
 	function print-as-{con,piped,json} {
 
 		if [[ "$VAR_TYPE" == (array|association) ]]; then
-			local -i MAX_WID=${#${(O@)keys//?/X}[1]}
+			local -i MAX_WID=$(( ${#${(O@)keys//?/X}[1]} + 1 ))
 			(( MAX_WID % 2 == 0 )) && integer -r HLF_WID=$(( MAX_WID / 2 )) || {
 				(( MAX_WID >= $COLUMNS )) && integer -r HLF_WID=$(( MAX_WID / 2 + 1 )) || integer -r HLF_WID=$(( MAX_WID / 2 - 1 ))
 			}
@@ -257,6 +257,8 @@ function a() {
 		print-it association scalar_parameter_value_map
 		print-it array funcsourcetrace
 		print-it array funcfiletrace
+		print-it association termcap  | less
+		print-it association terminfo | less
 		print "${${(%):-%x}:A:h}"
 		#print -P %x
 		# print -l -- "${funcsourcetrace[@]}"
