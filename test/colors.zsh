@@ -15,30 +15,27 @@ typeset -Ag fg=( ) bg=( ) attr=(
 ) end_attr=(
 	underline 	"$(ticode rmul)"
 )
-typeset -agU end_attr_supported=( ) attr_supported=( ) attr_combinations=( ) attr_combinations_supported=( )
+typeset -agU end_attr_supported=( ) attr_supported=( ) all_attr=( ) attr_combinations=( ) attr_combinations_supported=( )
 
 init() {
 	global-attr() {
-
 		combined-has-key() {
 			key-matches() {
-				local -a has_key_pt=( "${(oi@s<->)1}" )
-				for KEYPART in "${key_pt[@]}"; do
-					(( ${has_key_pt[(i)$KEYPART]} <= ${#has_key_pt[@]} )) || return 1
+				local -a has_key_pt=( "${(oi@s<->)1}" ); shift
+				while (( $# > 1 )); do
+					(( ${has_key_pt[(i)$1]} <= ${#has_key_pt[@]} )) || return 1
+					shift
 				done
 			}
 			local -a key_pt=( "${(oi@s<->)1}" ) has_key_pt=( )
-			local KEY='' KEYPART=''
-			local -a ac=( "${attr_combinations[@]}" )
-			for KEY in ${attr_combinations[@]}; do
+			local KEYPART=''
 
-				if key-matches
-				for KEYPART in "${key_pt[@]}"; do
-					if ; then return 1; fi
-				done
-			done
-			return 1
+			() {
+				while (( $# > 1 )); do key-matches "$1" "${key_pt[@]}" && return 0 || shift; done
+				return 1
+			} "${attr_combinations[@]}"; return $?
 		}
+
 		combine-attrs() {
 			contains-keys() {
 				local KEY="$1"; shift; local -a key_components=( "${(oi@s<->)KEY}" )
