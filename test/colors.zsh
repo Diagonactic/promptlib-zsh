@@ -6,82 +6,87 @@ setopt localoptions extendedglob shortloops
 ticode() 2>/dev/null echoti "$1"
 
 # Initialize Globals Used by Library
-typeset -Ag fg=( ) bg=( ) attr=(
-	blink 			"$(ticode blink)"
+typeset -Ag fg=( ) bg=( ) attr_map=(
 	bold 			"$(ticode bold)"
 	dim				"$(ticode dim)"
 	italic			"$(ticode sitm)"
 	underline		"$(ticode smul)"
+	blink 			"$(ticode blink)"
 ) end_attr=(
 	underline 	"$(ticode rmul)"
 )
-typeset -agU end_attr_supported=( ) attr_supported=( ) all_attr=( ) attr_combinations=( ) attr_combinations_supported=( )
+
+# Get base attributes that are unsupported by this terminal session
+typeset -agU unsupported_attrs=( )
+() {
+	while (( $# > 0 )); do [[ -n "${attr_map[$1]}" ]] || unsupported_attrs+=( "$1" ); done
+} "${(k)attr_map[@]}"
+
+from-map() {
+	while (( $# > 0 )); do
+		local KEY="$1"
+		() {
+			while (( $# > 0 )); do
+				attr_map[$KEY]+="${attr_map[$1]}"
+				if (( ${unsupported_attrs[(i)$1]} <= ${#${unsupported_attrs[@]}} )); then
+					unsupported_attrs+=( "$KEY" )
+				fi
+				shift
+			done
+
+		} ${(oi@s<->)KEY}
+		shift
+	done
+}
+#typeset -Ag extended_attr_map=(	"${(kv)attr_map[@]}" )
+from-map bold-blink bold-underline bold-italic dim-italic dim-underline dim-blink italic-underline italic-blink
+print -l -- "${(kvV)attr_map[@]}"
+print
+typeset -agU supported_end_attrs=( ) supported_attrs=( ) all_attrs=( "${(oik)extended_attr_map[@]}" )
+print -l -- "${(kvV)all_attrs[@]}"
+exit 0
+array-has-same-keys() {
+	local -a src=( "${(@P)1}" ); shift;
+	(( ${#src} == $# )) && (( ${#${${src[@]:|argv}[@]}} == 0 ))
+}
 
 init() {
+
 	global-attr() {
-		combined-has-key() {
-			key-matches() {
-				local -a has_key_pt=( "${(oi@s<->)1}" ); shift
-				while (( $# > 1 )); do
-					(( ${has_key_pt[(i)$1]} <= ${#has_key_pt[@]} )) || return 1
-					shift
-				done
-			}
-			local -a key_pt=( "${(oi@s<->)1}" ) has_key_pt=( )
-			local KEYPART=''
-
+		already-has-key() {
+			(( ${#all_attr_combinations[@]} > 0 || ${all_attr_combinations[(i)$1]} >= ${#all_attr_combinations[@]} )) || return 1
+			local SRCKEY="$1"; local -aU src=( ${(oi@s<->)1} ); shift
 			() {
-				while (( $# > 1 )); do key-matches "$1" "${key_pt[@]}" && return 0 || shift; done
-				return 1
-			} "${attr_combinations[@]}"; return $?
-		}
-
-		combine-attrs() {
-			contains-keys() {
-				local KEY="$1"; shift; local -a key_components=( "${(oi@s<->)KEY}" )
-				while (( $# > 0 )); do
-					(( ${#key_components[(i)$1]} <= ${#key_componets[@]} )) || return 1
-					shift
+				while (( $# >= 1 )); do
+					{ [[ "$1" == "$SRCKEY" ]] || array-has-same-keys src ${(uoi@s<->)1} } && return 1 || shift;
 				done
-			}
-			local KEY=''; integer CT=0;
-			for KEY in ${${(k)attr[@]}:#$1}; do
-				CT="${#attr_combinations[@]}"
-				components=(  )
-				new_components=( "${(oi@s<->)1}" )
-				if (( ${attr_combinations[(i)$1-$KEY]} <= $CT || ${attr_combinations[(i)$KEY-$1]} <= ${#attr_combinations[@]} )) || contains-keys "$KEY" "${(oi@s<->)KEY}"; then
-					continue
-				fi
-				attr_combinations+=( "$1-$KEY" )
-			done
+			} "${all_attr_combinations[@]}" && return 1 || return 0
 		}
+		all_attrs=( ${(k)attr_map[@]} ); all_attr_combinations=( ${all_attrs[@]} ); all_base_attrs=( ${all_attrs[@]} )
 		local KEY='' XKEY=''
-		for KEY in ${(k)attr[@]}; do
-			[[ -n "$attr[$KEY]" ]] || continue;
+		for KEY in ${all_attrs[@]}; do
+			[[ -n "$attr_map[$KEY]" ]] || continue;
 			supported_attrs+=( "$KEY" )
 		done
 		supported_attrs=( "${(oi)supported_attrs[@]}" )
-		set -x
-		for KEY in "${(k)attr[@]}"; do
-			for XKEY in "${(@)${(k)attr[@]}:#$KEY}"; do
-				if combined-has-key "$KEY-$XKEY"; then continue; fi
-				attr_combinations+=( "$KEY-$XKEY" )
-
-				# CT="${#attr_combinations[@]}"
-				# TEST="$XKEY-$KEY"
-				# if (( ${attr_combinations[(i)$TEST]} <= $CT )); then continue; fi
-				# TEST="$KEY-$XKEY"
-				# if (( ${attr_combinations[(i)$TEST]} <= $CT )); then continue; fi
-				# attr_combinations+=( "$KEY-$XKEY" )
+		print "${#${(k@)attr_map[@]}}"
+		repeat "${#${(k@)attr_map[@]}}"; do
+			for KEY in ${all_attr_combinations[@]}; do
+				for XKEY in ${all_base_attrs[@]:#KEY}; do
+					already-has-key "$KEY-$XKEY" && continue ||	all_attr_combinations+=( "$KEY-$XKEY" )
+				done
 			done
 		done
-		set +x
-		# attr_combinations=( "${(oi)attr_combinations[@]}" )
-		# for KEY in "${attr_combinations[@]}"; do
-		# 	combine-attrs "$KEY"
-		# done
-		# attr_combinations=( "${(oi)attr_combinations[@]}" )
-		print -l -- "${attr_combinations[@]}"
+		local VAL=''
+		set -x
+		local -a keys=( ${${all_attr_combinations[@]:|all_attrs}[@]} )
+		for KEY in ${keys[@]}; do
+			VAL=''
+			() { while (( $# > 0 )); do VAL+="${attr_map[$1]}"; shift; done	} ${(@s<->)KEY}
+			attr_map[$KEY]="$VAL"
+		done
+		print "attr_map:"
+		print -l -- "${(kvV)attr_map[@]}"
 		read -k1 -s
 	}
 	global-attr
@@ -112,12 +117,12 @@ init
         BG="$(echoti setab $i)"
         fg+=( \
             $i          		"$FG"         					\
-			dim-$i 				"$ATTROFF${attr[dim]}$FG"		\
+			dim-$i 				"$ATTROFF${attr_map[dim]}$FG"		\
             normal-$i   		"$ATTROFF$FG" 					\
-			italic-$i			"$ATTROFF${attr[italic]}$FG"    \
+			italic-$i			"$ATTROFF${attr_map[italic]}$FG"    \
 			bold-$i     		"$ATTROFF$BOLD$FG" 				\
-			underline-$i 		"$ATTROFF${attr[underline]}$FG" \
-			bold-underline-$i 	"$ATTROFF$BOLD${attr[underline]}$FG"
+			underline-$i 		"$ATTROFF${attr_map[underline]}$FG" \
+			bold-underline-$i 	"$ATTROFF$BOLD${attr_map[underline]}$FG"
         )
         bg+=( \
             $i          "$BG"         \
@@ -128,8 +133,8 @@ init
 		KEYV="${cname_map[$KEY]}"
 		FG="${fg[$KEYV]}"
 		fg+=( "$KEY" "$FG" )
-		for ATTR in ${(@)${(k@)attr[@]}:#end-*}; do
-			fg+=( "$ATTR-$KEY" "$ATTROFF${attr[$ATTR]}$FG" )
+		for ATTR in ${(@)${(k@)attr_map[@]}:#end-*}; do
+			fg+=( "$ATTR-$KEY" "$ATTROFF${attr_map[$ATTR]}$FG" )
 		done
     done
 	typeset -agU supported_basefg_colors=( )
@@ -179,7 +184,7 @@ print -- '------------------------------------'
 } "${(iok)fg[@]}"
 
 print -- "Terminal Attributes: ${(j< >)supported_attrs[@]}"
-print -- "Attribute Combinations: ${(j< >)${(io@)attr_combinations[@]}}"
+print -- "Attribute Combinations: ${(j< >)${(io@)all_attr_combinations[@]}}"
 print -- "Terminal Colors: ${(j< >)${(io@)supported_colors[@]}}"
 
 exit 0
