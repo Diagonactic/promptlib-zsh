@@ -154,6 +154,5 @@ print -- 'https://matthewdippel.blogspot.com ------'
 } "${(iok)fg[@]}"
 
 print -- "Terminal Attributes: ${(j< >)supported_attrs[@]}"
-print -- "Terminal Colors: ${(j< >)${(io@)supported_colors[@]}}"
 consupports/truecolor && print -- "True Color" || print -- "Not True Color"
 exit 0
