@@ -136,7 +136,12 @@ print -- 'https://matthewdippel.blogspot.com ------'
 () {
 	prt() {
 		(( ${unsupported_attrs[(i)$2]} >= ${#unsupported_attrs[@]} )) || return 0
-		print -n -- "${attr[reset]} - ${fg[$1]}${attr[$2]}${2}${attr[reset]}"
+		local -a sp=( "${(s<->@)2}" )
+		if (( ${#sp} == 1 )); then
+			print -n -- "${attr[reset]} - ${fg[$1]}${attr[$2]}${2}${attr[reset]}"
+		else
+			print -n -- "${attr[reset]} - ${fg[$1]}${attr[$2]}${(j<->)${sp[1]}-${sp:2[@]%%(alic|ink|derline)}}${attr[reset]}"
+		fi
 	}
 	typeset -i MAX_WIDTH=${#${(O@)${(k)fg[@]}//?/X}[1]}
 	local KEY=''
