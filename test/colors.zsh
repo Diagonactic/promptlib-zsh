@@ -9,7 +9,6 @@ typeset -ah target_keycombinations=(
 	{dim-{italic,underline,italic-underline,italic-underline-reverse},bold-{italic,underline,italic-underline,italic-underline-reverse},underline-{italic,{reverse,italic-reverse}}}
 )
 
-print -l -- "${target_keycombinations[@]}"
 typeset -Ag fg=( ) bg=( ) attr=(
 	bold 			"$(ticode bold)"
 	dim				"$(ticode dim)"
@@ -18,6 +17,7 @@ typeset -Ag fg=( ) bg=( ) attr=(
 	standout        "$(ticode smso)"
 	underline		"$(ticode smul)"
 	blink 			"$(ticode blink)"
+	strikethrough   "$(ticode smxx)"
 ) exit_attr=(
 	underline 		"$(ticode rmul)"
 	italic			"$(ticode ritm)"
@@ -59,8 +59,7 @@ typeset -agU unsupported_attrs=( )
 # Add the 'reset' capability
 attr+=( 'reset' "$(ticode sgr0)" )
 
-typeset -agU supported_end_attrs=( ) all_attrs=( "${(oik)attr[@]}" )
-typeset -agU supported_attrs=( ${${all_attrs[@]:|unsupported_attrs}[@]} )
+typeset -agU supported_end_attrs=( ) all_attrs=( "${(oik)attr[@]}" ) supported_attrs=( ${${${${(oik)attr[@]}:|unsupported_attrs}[@]}:#*-*} )
 
 function concmds/{clear{,-to-{bol,eol,eos}},reset} {
 	print -n -- "${cmds[${0##*/}]}"
@@ -70,8 +69,6 @@ function consupports/truecolor {
 		(truecolor) [[ "${supports[${0##*/}]}" == yes ]]
 	esac
 }
-
-concmds/clear
 
 () {
     local -A cname_map=(
@@ -124,40 +121,40 @@ rstpr() {
 	print -n "${1:-}"$'\e[0m\e[0;37m'
 }
 
-for i in {1..16}; do
-	eti "$i:" sgr0
-	eti "sgr0-$i " setaf $i
-	eti "sgr 1-$i" bold
-	rstpr
-	print
-done
-print -- 'https://matthewdippel.blogspot.com ------'
+# Test to print results
+print-terminal-details() {
+	() {
+		prt() {
+			local -a sp=( "${(s<->@)2}" )
+			(( ${#${(M)unsupported_attrs[@]:#${(@)sp}}} == 0 )) || return 0
 
-() {
-	prt() {
-		(( ${unsupported_attrs[(i)$2]} >= ${#unsupported_attrs[@]} )) || return 0
-		local -a sp=( "${(s<->@)2}" )
-		if (( ${#sp} == 1 )); then
-			print -n -- "${attr[reset]} - ${fg[$1]}${attr[$2]}${2}${attr[reset]}"
-		else
-			print -n -- "${attr[reset]} - ${fg[$1]}${attr[$2]}${(j<->)${sp[1]}-${sp:2[@]%%(alic|ink|derline)}}${attr[reset]}"
-		fi
-	}
-	typeset -i MAX_WIDTH=${#${(O@)${(k)fg[@]}//?/X}[1]}
-	local KEY=''
-	while (( $# > 0 )); do
-		rstpr
-		if [[ "$1" == (*-black|*-0) ]]; then print -n $'\e[0m\e[0;37m'"($1)"; fi
-		print -n -- "${fg[$1]}${(r<13>)1}";
-		local ITM=''
-		for ITM in "${target_keycombinations[@]}"; do
-			prt "$1" "$ITM"
+			if (( ${#sp} == 1 )); then
+				print -n -- "${attr[reset]}:${fg[$1]}${attr[$2]}${2%%(line|ic)}${attr[reset]}"
+			else
+				print -n -- "${attr[reset]}:${fg[$1]}${attr[$2]}${(j<->)${sp[@]%%(alic|nk|line|erse)}}${attr[reset]}"
+			fi
+		}
+		typeset -i MAX_WIDTH=${#${(O@)${(k)fg[@]}//?/X}[1]}
+		local KEY=''
+		while (( $# > 0 )); do
+			rstpr
+			if [[ "$1" == (*-black|*-0) ]]; then print -n $'\e[0m\e[0;37m'"($1)"; fi
+			print -n -- "${fg[$1]}${(r<13>)1}";
+			local ITM=''
+			for ITM in "${target_keycombinations[@]}"; do
+				prt "$1" "$ITM"
+			done
+			print
+			shift
 		done
-		print
-		shift
-	done
-} "${(iok)fg[@]}"
+		rstpr
+		print -- "Attribute Details:"
+		print -- "Supported: \e[1;97m${(j<\e[0m, \e[1;97m>)supported_attrs[@]}"; rstpr
+		print -- "Unsupported: \e[1;97m${(j<\e[0m, \e[1;97m>)unsupported_attrs[@]}"; rstpr
+		print -- "Terminal Capabilities:"
+		consupports/truecolor && print -- "True Color" || print -- "Not True Color"
+	} "${(iok)fg[@]}"
+}
 
-print -- "Terminal Attributes: ${(j< >)supported_attrs[@]}"
-consupports/truecolor && print -- "True Color" || print -- "Not True Color"
+print-terminal-details
 exit 0
