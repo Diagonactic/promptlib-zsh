@@ -125,7 +125,7 @@ plib_git_dirty(){
     unset __mod_ut __new_ut __add_ut __mod_t __new_t __add_t __del
 }
 
-lplib_git_left_right(){
+plib_git_left_right(){
     [[ -z "${PLIB_GIT_PUSH_SYM}" ]] && PLIB_GIT_PUSH_SYM=↑
     [[ -z "${PLIB_GIT_PULL_SYM}" ]] && PLIB_GIT_PULL_SYM=↓
     if [[ "$(plib_git_remote_defined)" == 1 ]]; then

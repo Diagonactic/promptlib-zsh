@@ -111,7 +111,7 @@ print_values() {
 check_temp() { [[ -n "$1" && -d "$1" ]]; }
 
 wrap-fplib-git-details() safe_execute -x -r 0 fplib-git-details
-
+wait_key() { print '... stopping ...'; read -k1 -s }
 # Create test repositories in /tmp
 declare -gr REPO="$(mktemp -d)"
 IS_DIRTY=1
@@ -145,9 +145,9 @@ if ! check_temp "$REPO" || ! check_temp "$REPO_ALT"; then __fail "Failed to crea
             touch "$REPO/test.txt"
             fplib-git-details:locals
             wrap-fplib-git-details
-
             assert/association "git_property_map" is-equal-to    \
                 git-rev       'detached'  has-commits   '0'  has-remotes   'no'  local-branch  'master'  nearest-root "$REPO"  remote-branch ''
+
             assert/association "repo_status_staged" is-equal-to \
                 add-len '0'  add-paths ''  del-len '0'  del-paths ''  mod-len '0'  mod-paths ''  ren-len '0'  ren-paths ''
             assert/association "repo_status_unstaged" is-equal-to \
@@ -155,14 +155,21 @@ if ! check_temp "$REPO" || ! check_temp "$REPO_ALT"; then __fail "Failed to crea
 
             command git add "$REPO/test.txt"                     || __fail "Couldn't git add test.txt"
             wrap-fplib-git-details
-            assert/association "git_property_map" is-equal-to    \
-                git-rev       'detached'  has-commits   '0'  has-remotes   'no'  local-branch  'master'  nearest-root "$REPO"  remote-branch ''
             assert/association "repo_status_staged" is-equal-to \
-                add-len 1  add-paths ''  del-len '0'  del-paths ''  mod-len '0'  mod-paths ''  ren-len '0'  ren-paths ''
+                add-len   '1'        add-paths 'test.txt' \
+                del-len   '0'        del-paths ''         \
+                mod-len   '0'        mod-paths ''         \
+                ren-len   '0'        ren-paths ''
+
             assert/association "repo_status_unstaged" is-equal-to \
-                add-len '0'  add-paths ''  del-len '0'  del-paths ''  mod-len '0'  mod-paths ''  new-len '1'  new-paths 'test.txt'  ren-len '0'  ren-paths ''
+                add-len   '0' add-paths ''  \
+                del-len   '0' del-paths ''  \
+                mod-len   '0' mod-paths ''  \
+                new-len   '0' new-paths ''  \
+                ren-len   '0' ren-paths ''
 
             command git commit -m 'test commit' > /dev/null 2>&1 || __fail "Couldn't create test commit"
+
             echo '$#/usr/bin/env zsh' > "$REPO/test.txt"
 
             safe_execute -x -r 0 fplib-git-details
@@ -172,18 +179,17 @@ if ! check_temp "$REPO" || ! check_temp "$REPO_ALT"; then __fail "Failed to crea
                 has-remotes   'no'                            local-branch  'master' \
                 nearest-root  "$REPO"                         remote-branch 'master'
 
+            assert/association "repo_status_staged" is-equal-to \
+                add-len   '0' add-paths ''  \
+                del-len   '0' del-paths ''  \
+                mod-len   '0' mod-paths ''  \
+                ren-len   '0' ren-paths ''
+
             assert/association "repo_status_unstaged" is-equal-to \
                 add-len   '0'        add-paths ''         \
                 del-len   '0'        del-paths ''         \
                 mod-len   '1'        mod-paths 'test.txt' \
                 new-len   '0'        new-paths ''         \
-                ren-len   '0'        ren-paths ''
-
-            assert/association "repo_status_unstaged" is-equal-to \
-                add-len   '0'        add-paths ''         \
-                del-len   '0'        del-paths ''         \
-                mod-len   '0'        mod-paths ''         \
-                new-len   '1'        new-paths 'test.txt' \
                 ren-len   '0'        ren-paths ''
 
             pushd "$REPO_ALT"

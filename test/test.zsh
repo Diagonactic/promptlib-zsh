@@ -263,6 +263,7 @@ function assert/{scalar,integer,float,array,association} {
                 print $'\t\t\e[1;91m['"$___KEY"'] is unexpected (Value was \e[0;37m'"'${___actual_value[$___KEY]}')"$CLR_RST
                 ___has_failed=1
             done
+            set +x
             if (( ___has_failed )); then
                 __print_fail "Association '$___association_name' keys/values do not match:"
                 print "$___MSG"
@@ -275,6 +276,7 @@ function assert/{scalar,integer,float,array,association} {
         }
         local -A ___actual_value=( "${(kvP@)1}" )
 
+        set -x
         case "$2" in
             (is[-_]equal|is[-_]equal[-_]to) is_equal "$1" "${@:3}" ;;
             (is[-_]empty)                   is_equal "$1"      ;;
@@ -392,7 +394,7 @@ __ut/to_clip() {
     __ut:to_clip:noisy "$@"
 }
 __ut/debug_maps() {
-    set -x
+    #set -x
     typeset -ga call_relative_lines=( "${functrace[@]##*:}" )    call_source_files=( "${funcfiletrace[@]%%:*}" ) \
                 call_source_lines=( "${funcfiletrace[@]##*:}" )  call_fn_source=( "${functions_source[@]}" ) \
                 call_source_lines_code=( )
@@ -417,7 +419,7 @@ __ut/debug_maps() {
 alias __ut:debug_maps='local -a call_stack=( ) call_relative_lines=( ) call_source_files=( ) call_source_lines=( ) call_source_lines_code=( ); local -A call_func_line_map=( ) call_file_line_map=( ) call_file_map=( ) call_fn_line_map=( ); __ut/debug_maps'
 
 __ut/debug_call_details() {
-    set -x
+    #set -x
     create-from-ix() {
         local DAMMIT="${funcsourcetrace[$1]}"
         local SOURCE_FILE="${${:-${TEST_LIB_PATH}/${funcfiletrace[$1]%%:*}}:A}" FNTRACE="${functrace[$1]}"
@@ -459,12 +461,9 @@ __ut/dump_declare() {
 __ut/clip/association/assertion() {
     __ut:to_clip:switches
     get_stmt() {
-        print -l -- "${${functrace[@]:^^funcfiletrace}[@]}"
+        #print -l -- "${${functrace[@]:^^funcfiletrace}[@]}"
         print "assert/association \"$1\" is-equal-to \\"
         shift
-        __ut:debug_maps
-        __ut:debug_call_details '-1'
-        __ut/dump_declare 'readonly'
         if (( $# % 2 != 0 )); then print -- "Can't create assertion for $1!" > /dev/stderr; return 1; fi
         local -A assoc=( "$@" );
         local -a keys=( "${(q@)${(k@)assoc[@]}}" ) vals=( "${(qqv@)assoc[@]}" ) ordered_keys=( ${(ok@)assoc[@]} )
