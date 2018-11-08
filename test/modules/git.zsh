@@ -1,4 +1,5 @@
 #!/bin/zsh
+clear
 source ../test.zsh
 source "../../modules/git.zsh"
 
@@ -57,11 +58,15 @@ reset_test_repos() {
 create_test_repos() {
     pushd "$REPO_ALT"
     {
-        command git init > /dev/null 2>&1
+        safe_execute -xr 0 command git init > /dev/null 2>&1
     } always { popd }
     pushd "$REPO"
     {
-        command git init > /dev/null 2>&1
+        safe_execute -xr 0 command git init -q
+    } always { popd }
+    pushd "$REPO_REMOTE"
+    {
+        safe_execute -xr 0 command git init -q --bare
     } always { popd }
 }
 yes_no() {
@@ -108,6 +113,9 @@ print_values() {
     yes_no      "Has Commits" ${git_property_map[has-commits]}
     yes_no      "Has Remotes" ${git_property_map[has-remotes]}
 }
+add-commit {
+    git add . && git commit -m '.'
+}
 check_temp() { [[ -n "$1" && -d "$1" ]]; }
 
 wrap-fplib-git-details() safe_execute -x -r 0 fplib-git-details
@@ -115,45 +123,54 @@ wait_key() { print '... stopping ...'; read -k1 -s }
 # Create test repositories in /tmp
 declare -gr REPO="$(mktemp -d)"
 IS_DIRTY=1
-declare -gr REPO_ALT="$(mktemp -d)" || { __fail "Failed to create temporary directory" }
+declare -g REPO{_ALT,_REMOTE}='';
+REPO_ALT="$(mktemp -d)" || { __fail "Failed to create temporary directory" }
+REPO_REMOTE="$(mktemp -d)" || { __fail "Failed to create temporary directory" }
+
 if ! check_temp "$REPO" || ! check_temp "$REPO_ALT"; then __fail "Failed to create temporary directory"; fi
 {
     create_test_repos
+
     unit_group "empty-no-remote" "Check empty, but valid, git repostiory properties - no remote" test_sections {
         pushd "$REPO"
         {
+            safe_execute -x -r 0 command git checkout -q -b master
             fplib-git-details:locals
             safe_execute -x -r 0 fplib-git-details
 
             assert/association "git_property_map" is-equal-to    \
                 git-rev       'detached'  has-commits   '0'      \
                 has-remotes   'no'        local-branch  'master' \
-                nearest-root  "$REPO"     remote-branch ''
+                nearest-root  "$REPO"     remote-branch ''       \
+                ahead-by      0           behind-by     0
             pushd "$REPO_ALT"
             {
                 safe_execute -x -r 0 fplib-git-details
                 assert/association "git_property_map" is-equal-to    \
                     git-rev       'detached'  has-commits   '0'      \
                     has-remotes   'no'        local-branch  'master' \
-                    nearest-root  "$REPO_ALT"     remote-branch ''
+                    nearest-root  "$REPO_ALT" remote-branch ''       \
+                    ahead-by      0           behind-by     0
             } always { popd }
         } always { popd }
     }
     unit_group "empty-no-remote-add" "Git repositories with one added file" test_sections {
         pushd "$REPO"
         {
+            safe_execute -x -r 0 command git checkout -q -b master
             touch "$REPO/test.txt"
             fplib-git-details:locals
             wrap-fplib-git-details
             assert/association "git_property_map" is-equal-to    \
-                git-rev       'detached'  has-commits   '0'  has-remotes   'no'  local-branch  'master'  nearest-root "$REPO"  remote-branch ''
+                git-rev       'detached'  has-commits   '0'  has-remotes   'no'  local-branch  'master'  nearest-root "$REPO"  remote-branch '' \
+                ahead-by      0           behind-by     0
 
             assert/association "repo_status_staged" is-equal-to \
                 add-len '0'  add-paths ''  del-len '0'  del-paths ''  mod-len '0'  mod-paths ''  ren-len '0'  ren-paths ''
             assert/association "repo_status_unstaged" is-equal-to \
                 add-len '0'  add-paths ''  del-len '0'  del-paths ''  mod-len '0'  mod-paths ''  new-len '1'  new-paths 'test.txt'  ren-len '0'  ren-paths ''
 
-            command git add "$REPO/test.txt"                     || __fail "Couldn't git add test.txt"
+            safe_execute -x -r 0 command git add "$REPO/test.txt"                     || __fail "Couldn't git add test.txt"
             wrap-fplib-git-details
             assert/association "repo_status_staged" is-equal-to \
                 add-len   '1'        add-paths 'test.txt' \
@@ -168,7 +185,7 @@ if ! check_temp "$REPO" || ! check_temp "$REPO_ALT"; then __fail "Failed to crea
                 new-len   '0' new-paths ''  \
                 ren-len   '0' ren-paths ''
 
-            command git commit -m 'test commit' > /dev/null 2>&1 || __fail "Couldn't create test commit"
+            safe_execute -x -r 0 command git commit -m 'test commit' > /dev/null 2>&1 || __fail "Couldn't create test commit"
 
             echo '$#/usr/bin/env zsh' > "$REPO/test.txt"
 
@@ -177,7 +194,8 @@ if ! check_temp "$REPO" || ! check_temp "$REPO_ALT"; then __fail "Failed to crea
             assert/association "git_property_map" is-equal-to \
                 git-rev       "${git_property_map[git-rev]}"  has-commits   '1'      \
                 has-remotes   'no'                            local-branch  'master' \
-                nearest-root  "$REPO"                         remote-branch 'master'
+                nearest-root  "$REPO"                         remote-branch 'master' \
+                ahead-by      0                               behind-by     0
 
             assert/association "repo_status_staged" is-equal-to \
                 add-len   '0' add-paths ''  \
@@ -192,17 +210,93 @@ if ! check_temp "$REPO" || ! check_temp "$REPO_ALT"; then __fail "Failed to crea
                 new-len   '0'        new-paths ''         \
                 ren-len   '0'        ren-paths ''
 
+            safe_execute -xr 0 command git remote add origin "$REPO_REMOTE" > /dev/null 2>&1
+            safe_execute -xr 0 command git push -q origin master
+            safe_execute -xr 0 command git branch --set-upstream-to=origin/master master
+
             pushd "$REPO_ALT"
             {
+                safe_execute -x -r 0 -- command git checkout --no-progress -qfB master
+                safe_execute -x -r 0 -- fplib-git-details
+                assert/association "git_property_map" is-equal-to            \
+                    git-rev       'detached'          has-commits   '0'      \
+                    has-remotes   'no'                local-branch  'master' \
+                    nearest-root  "$REPO_ALT"         remote-branch ''       \
+                    ahead-by      0                   behind-by     0
+
+                assert/association "repo_status_unstaged" is-equal-to \
+                    add-len   '0'        add-paths ''   \
+                    del-len   '0'        del-paths ''   \
+                    mod-len   '0'        mod-paths ''   \
+                    new-len   '0'        new-paths ''   \
+                    ren-len   '0'        ren-paths ''
+
+                safe_execute -xr 0 -- command git remote add origin "$REPO_REMOTE" > /dev/null 2>&1
+                safe_execute -xr 0 -- command git checkout -q -b master;
+                safe_execute -xr 0 -- command git pull -q origin master
+                safe_execute -xr 0 -- command git branch --set-upstream-to=origin/master master
+
+                safe_execute -x -r 0 command git fetch -q
                 safe_execute -x -r 0 fplib-git-details
-                assert/association "git_property_map" is-equal-to    \
-                    git-rev       'detached'  has-commits   '0'      \
-                    has-remotes   'no'        local-branch  'master' \
-                    nearest-root  "$REPO_ALT"     remote-branch ''
+                assert/association "git_property_map" is-equal-to \
+                    git-rev       "${git_property_map[git-rev]}" has-commits   1              \
+                    has-remotes   yes                            local-branch  master         \
+                    nearest-root  "$REPO_ALT"                    remote-branch origin/master  \
+                    ahead-by      0                              behind-by     0
+
+                assert/association "repo_status_unstaged" is-equal-to \
+                    add-len   '0'        add-paths ''   \
+                    del-len   '0'        del-paths ''   \
+                    mod-len   '0'        mod-paths ''   \
+                    new-len   '0'        new-paths ''   \
+                    ren-len   '0'        ren-paths ''
+
+                echo 'blah' > boo.txt
+                safe_execute -xr 0 -- command git add .
+                safe_execute -xr 0 -- command git commit -m 'boo.txt'
+                safe_execute -x -r 0 -- fplib-git-details
+                print "$PWD"
+
+                assert/association "git_property_map" is-equal-to \
+                    git-rev       "${git_property_map[git-rev]}" has-commits   1              \
+                    has-remotes   yes                            local-branch  master         \
+                    nearest-root  "$REPO_ALT"                    remote-branch origin/master  \
+                    ahead-by      1                              behind-by     0
+
+                #read -k1 -s
             } always { popd }
 
+            echo 'blah' > bar.txt
+            safe_execute -xr 0 -- command git add .
+            safe_execute -xr 0 -- command git commit -m 'bar.txt'
+            safe_execute -xr 0 -- command git push -q
+
+            pushd "$REPO_ALT"
+            {
+                safe_execute -xr 0 -- command git fetch -q
+                safe_execute -x -r 0 -- fplib-git-details
+                assert/association "git_property_map" is-equal-to \
+                    git-rev       "${git_property_map[git-rev]}" has-commits   1              \
+                    has-remotes   yes                            local-branch  master         \
+                    nearest-root  "$REPO_ALT"                    remote-branch origin/master  \
+                    ahead-by      1                              behind-by     1
+
+                safe_execute -xr 0 -- command git pull -q
+                safe_execute -xr 0 -- fplib-git-details
+                assert/association "git_property_map" is-equal-to git-rev "${git_property_map[git-rev]}" nearest-root "$PWD" has-remotes yes has-commits 1 \
+                    local-branch master     remote-branch origin/master     ahead-by 2 behind-by 0
+
+                safe_execute -xr 0 -- command git push -q
+            } always { popd }
+
+            safe_execute -xr 0 -- command git fetch -q -a
+            safe_execute -xr 0 -- fplib-git-details
+            assert/association "git_property_map" is-equal-to git-rev "${git_property_map[git-rev]}" nearest-root "$PWD" has-remotes yes has-commits 1 \
+                local-branch master     remote-branch origin/master     ahead-by 0 behind-by 2
+            echo 'blah' > baz.txt
+            { git add . && git commit -m '.' } || __fail "Failed to add baz.txt"
 
         } always { popd }
     }
-} always { (( IS_DIRTY == 0 )) || cleanup 'success' }
+} always { (( IS_DIRTY == 0 )) && print -- 'clean ' || cleanup 'success' }
 
