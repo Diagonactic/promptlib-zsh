@@ -1,8 +1,6 @@
 #!/usr/bin/env zsh
 
-if [[ -z "${MODULES}" ]]
-then
-MODULES=(
+[[ -n "${MODULES}" ]] || declare -ga MODULES=(
   background_job
   crystal
   disk
@@ -19,4 +17,4 @@ MODULES=(
   subversion
   time
 )
-fi
+

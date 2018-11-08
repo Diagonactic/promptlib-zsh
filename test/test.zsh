@@ -22,9 +22,8 @@ zmodload zsh/parameter
 # *-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*-*
 typeset -g TEST_LIB_PATH="${${${(%):-%x}:A}:h}/modules"
 ___test_arg="$1"
-__ut/escape_ans() { set +x
-    print -r -- "${${1//$'\e'/\\e}//$'\n'/\\n}";
-}
+__ut/escape_ans() { set +x; print -r -- "${${1//$'\e'/\\e}//$'\n'/\\n}"; }
+
 __ut/fail_diff_string() {
 
     local ACTUAL="`__ut/escape_ans "$1"`"
@@ -276,7 +275,6 @@ function assert/{scalar,integer,float,array,association} {
         }
         local -A ___actual_value=( "${(kvP@)1}" )
 
-        set -x
         case "$2" in
             (is[-_]equal|is[-_]equal[-_]to) is_equal "$1" "${@:3}" ;;
             (is[-_]empty)                   is_equal "$1"      ;;
@@ -610,7 +608,7 @@ assert_nodiff() { set +x
     }
 }
 
-assert_return() {
+assert/return() {
     local result=$?
     set +x # Don't move this above $? or return code won't be captured
     local -i expected="$2"
@@ -619,7 +617,6 @@ assert_return() {
         && __success "Expected result of \e[4;92m$result\e[0m\e[1;37m received from \e[4;97m$name\e[0m\e[1;37m" \
         || __fail "Expected result received from \e[4;97m$name\e[0m\e[1;37m to be '\e[4;37m$expected\e[0m\e[1;37m'; got '\e[1;91m$result\e[0m\e[1;37m'"
 }
-
 function safe_execute {
     local {OPT,OPTARG}
 
@@ -713,7 +710,7 @@ function safe_execute {
         if (( SKIP_SUBSHELL == 0 )); then rm "$TSTDERR"; fi
     }
 
-    (( EXPECTED_RC == -1 )) || { () { return $RC }; assert_return "${(j: :)last_executed[@]}" $EXPECTED_RC }
+    (( EXPECTED_RC == -1 )) || { () { return $RC }; assert/return "${(j: :)last_executed[@]}" $EXPECTED_RC }
     [[ -z "$EXPECTED_REFVAR_VALUE" ]] || {
         assert/$RV_TYPE ACTUAL_REFVAR_VALUE is-equal-to "${EXPECTED_REFVAR_VALUE}"
     }
