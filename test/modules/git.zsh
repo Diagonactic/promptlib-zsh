@@ -294,7 +294,7 @@ if ! check_temp "$REPO" || ! check_temp "$REPO_ALT"; then __fail "Failed to crea
             assert/association "git_property_map" is-equal-to git-rev "${git_property_map[git-rev]}" nearest-root "$PWD" has-remotes yes has-commits 1 \
                 local-branch master     remote-branch origin/master     ahead-by 0 behind-by 2
             echo 'blah' > baz.txt
-            { git add . && git commit -m '.' } || __fail "Failed to add baz.txt"
+            safe-execute -xr 0 -- add-commit
 
         } always { popd }
     }
