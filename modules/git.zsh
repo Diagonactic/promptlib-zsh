@@ -1,20 +1,53 @@
 #!/usr/bin/env zsh
 
 # All of the expensive calls rolled into one method
+git-revparse-target() {
+    pushd "$1"
+    {
+        \git rev-parse "$@" 2>/dev/null
+    } always { [[ "$1" == "$OCWD" ]] || popd }
+}
+is-git-repository() { git-revparse-target "${1:-$PWD}" --is-insider-work-tree }
 
-fplib-is_git() command git rev-parse --show-toplevel > /dev/null 2>&1
-
-local ___AR="git_reomtes=( ) git_status=( )" ___AS="git_property_map=( ) repo_status_unstaged=( ) repo_status_staged=( )"
-alias fplib-git-details:locals="local -a ${___AR}; local -A ${___AS}"
-alias fplib-git-details:globals="typeset -ga ${___AR}; typeset -gA ${___AS}"
+local ___AR="git_reomtes=( ) git_status=( )" ___AS="git_property_map=( ) repo_status_unstaged=( ) repo_status_staged=( ) repo_submodules=( ) repo_subtrees"
+alias repo-details:locals="local -a ${___AR}; local -A ${___AS}; local REPO_ABSOLUTE_ROOT=''"
+alias repo-details:globals="typeset -ga ${___AR}; typeset -gA ${___AS}; typeset -g REPO_ABSOLUTE_ROOT=''"
 unset ___A{R,S};
 
-fplib-git-details() {
+is-submodule() {
+    1="${1:-$PWD}"
+    [[ -n "$1" ]] || return $?
+    2="$(git-revparse-target "$1" --git-dir)" || return $?
+    [[ "${2:h:t}" == "modules" ]]
+}
 
+git-repo-root() {
+    impl-repo-root() {
+        typeset -g REPO_ABSOLUTE_ROOT=''
+        is-git-repository || return 1
+        local -a parent_repos=( (../)#.git(N) )
+        parent_repos=( "${(@)${(@)parent_repos:A}%%/.git}" )
+        (( ${#parent_repos} > 0 )) || REPO_ABSOLUTE_ROOT="$PWD"
+        REPO_ABSOLUTE_ROOT=${${parent_repos[(r)${(l.${#${(o@)parent_repos//?/X}[1]}..?.)}]}:-$GIT_REPO_ROOT};
+    }
+    local TGT="${1:-$PWD}"
+    pushd "$TGT"
+    {
+        impl-repo-root || return 1
+    } always { popd }
+}
+repo-discover() {
+
+
+    is-git-repository || return $?
+
+    [[ -d ".git" ]]
+}
+repo-details() {
     get-gitcommands() {
-        command git remote -v 2>/dev/null || { return 1 }
+        \git remote -v 2>/dev/null || { return 1 }
         print -- '--'
-        command git rev-parse HEAD --show-toplevel 2>/dev/null || {
+        \git rev-parse HEAD --show-toplevel 2>/dev/null || {
             print -- 'detached'
             git rev-parse --show-toplevel 2>/dev/null || {
                 print -- 'not initialized'
@@ -22,7 +55,7 @@ fplib-git-details() {
             }
         }
         print -- $'--\n--'
-        command git status --porcelain -b 2>/dev/null
+        \git status --porcelain -b 2>/dev/null
     }
 
     () {

@@ -276,7 +276,6 @@ function assert/{scalar,integer,float,array,association} {
         }
         local -A ___actual_value=( "${(kvP@)1}" )
 
-        set -x
         case "$2" in
             (is[-_]equal|is[-_]equal[-_]to) is_equal "$1" "${@:3}" ;;
             (is[-_]empty)                   is_equal "$1"      ;;
