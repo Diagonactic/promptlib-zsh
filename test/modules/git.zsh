@@ -13,18 +13,18 @@ cleanup() {
     local -ir IS_FAILURE="${${${(M)1:#fail*}:+1}:-0}"; shift
     [[ -z "${1:-}" ]] || { local -r MSG="${2:-}"; shift }
 
-    print-cleanup-result() {
-        case "$IS_FAILURE" in
-            (0) (( ${+MSG} == 0 ))       || __success "$1"
-                (( ${+CLEAN_MSG} == 0 )) || { __print_fail "$CLEAN_MSG"; return 2 }
-                ;;
-            (1) (( ${+CLEAN_MSG} == 0 )) || 1+=$'\n\t - '"$CLEAN_MSG"
-                __print_fail "$1"
-                return 1
-                ;;
-        esac
-    }
     safe-remove-test-repo() {
+        print-cleanup-result() {
+            case "$IS_FAILURE" in
+                (0) (( ${+MSG} == 0 ))       || __success "$1"
+                    (( ${+CLEAN_MSG} == 0 )) || { __print_fail "$CLEAN_MSG"; return 2 }
+                    ;;
+                (1) (( ${+CLEAN_MSG} == 0 )) || 1+=$'\n\t - '"$CLEAN_MSG"
+                    __print_fail "$1"
+                    return 1
+                    ;;
+            esac
+        }
         if (( $# != 1 )) || [[ -z "${1:-}" ]]; then __ut/die_usage 1 "Function $0: Expected path to remove"; fi
         local -r REPO="$1"
         {
@@ -42,20 +42,24 @@ cleanup() {
             fi
         } always { IS_DIRTY=0 }
     }
-    [[ -z "$REPO" ]] || safe-remove-test-repo "$REPO"
-    [[ -z "$REPO_ALT" ]] || safe-remove-test-repo "$REPO_ALT"
+    [[ -z "$REPO" ]]        || safe-remove-test-repo "$REPO"
+    [[ -z "$REPO_ALT" ]]    || safe-remove-test-repo "$REPO_ALT"
+    [[ -z "$REPO_REMOTE" ]] || safe-remove-test-repo "$REPO_REMOTE"
 }
 reset_test_repos() {
     reset-repo() {
         if [[ -n "$1" && -d "$1" && "$1" == /tmp* ]]; then
             rm -rf "$1/*" "$1/.*" && return 0 || __fail "Falied to clear repository at: '$REPO'"
         fi
-        __fail "Failed to clean repository at '$REPO' - it didn't exist or its name was possibly unsafe"
+        __fail "Failed to clean repository at '$1' - it didn't exist or its name was possibly unsafe"
     }
-    reset-repo "$REPO"
-    reset-repo "$REPO_ALT"
+    reset-repo "$REPO" && unset REPO
+    reset-repo "$REPO_ALT" && unset REPO_ALT
 }
 create_test_repos() {
+    [[ -n "$REPO_ALT" ]] || { typeset -g REPO_ALT='' && REPO_ALT="$(mktemp -d)" || die "Failed to create temporary directory for REPO_ALT" }
+    [[ -n "$REPO" ]] || { typeset -g REPO='' && REPO="$(mktemp -d)" || die "Failed to create temporary directory for REPO" }
+    [[ -n "$REPO_REMOTE" ]] || { typeset -g REPO_REMOTE='' && REPO_REMOTE="$(mktemp -d)" || die "Failed to create temporary directory for REPO_REMOTE" }
     pushd "$REPO_ALT"
     {
         safe_execute -xr 0 command git init > /dev/null 2>&1
@@ -76,7 +80,6 @@ print_value() {
     print -- "${(r.20.)1}: '$2'"
 }
 print_values() {
-    # set -x
     # print -l "${(kv)git_property_map[@]}"
     # local KEY=''
     # for KEY in "${(k)git_property_map[@]}"; do
@@ -118,8 +121,7 @@ add-commit() {
     git add . && git commit -m '.'
 }
 check_temp() { [[ -n "$1" && -d "$1" ]]; }
-
-refresh-git-details() safe_execute -xr 0 -- fplib-git-details
+wrap-fplib-git-details() safe_execute -x -r 0 repo-details
 wait_key() { print '... stopping ...'; read -k1 -s }
 check-repo-props() {
     safe_execute -xr 0 -- fplib-git-details
@@ -167,24 +169,29 @@ assert/clean-status() {
 }
 
 # Create test repositories in /tmp
-declare -gr REPO="$(mktemp -d)"
-IS_DIRTY=1
 declare -g REPO{_ALT,_REMOTE}='';
-REPO_ALT="$(mktemp -d)" || { __fail "Failed to create temporary directory" }
-REPO_REMOTE="$(mktemp -d)" || { __fail "Failed to create temporary directory" }
-
+IS_DIRTY=1
+create_test_repos
 if ! check_temp "$REPO" || ! check_temp "$REPO_ALT"; then __fail "Failed to create temporary directory"; fi
 {
-    create_test_repos
-
     unit_group "empty-no-remote" "Check empty, but valid, git repostiory properties - no remote" test_sections {
         pushd "$REPO"
         {
-            safe_execute -x -r 0 command git checkout -q -b master
-            fplib-git-details:locals
-            assert/property-map git-rev detached has-commits 0 has-remotes no
+            repo-details:locals
+            safe_execute -x -r 0 repo-details
 
-            pushd "$REPO_ALT"; { assert/property-map git-rev detached has-commits 0 has-remotes no } always { popd }
+            assert/association "git_property_map" is-equal-to    \
+                git-rev       'detached'  has-commits   '0'      \
+                has-remotes   'no'        local-branch  'master' \
+                nearest-root  "$REPO"     remote-branch ''
+            pushd "$REPO_ALT"
+            {
+                safe_execute -x -r 0 repo-details
+                assert/association "git_property_map" is-equal-to    \
+                    git-rev       'detached'  has-commits   '0'      \
+                    has-remotes   'no'        local-branch  'master' \
+                    nearest-root  "$REPO_ALT"     remote-branch ''
+            } always { popd }
         } always { popd }
     }
     unit_group "empty-no-remote-add" "Git repo, one added file through to commit" test_sections {
@@ -232,6 +239,11 @@ if ! check_temp "$REPO" || ! check_temp "$REPO_ALT"; then __fail "Failed to crea
 
             pushd "$REPO_ALT"
             {
+                safe_execute -x -r 0 repo-details
+                assert/association "git_property_map" is-equal-to    \
+                    git-rev       'detached'  has-commits   '0'      \
+                    has-remotes   'no'        local-branch  'master' \
+                    nearest-root  "$REPO_ALT"     remote-branch ''
                 safe_execute -x -r 0 -- command git checkout --no-progress -qfB master
                 assert/property-map git-rev detached has-commits 0 has-remotes no
                 assert/clean-status
@@ -291,7 +303,24 @@ if ! check_temp "$REPO" || ! check_temp "$REPO_ALT"; then __fail "Failed to crea
 
                 safe_execute -xr 0 -- command git push -q
             } always { popd }
+        } always { popd }
+    }
 
+    unit_group "empty-no-remote-add" "Git repositories with one added file" test_sections {
+        pushd "$REPO"
+        {
+            touch "$REPO/test.txt"
+            repo-details:locals
+            wrap-fplib-git-details
+            assert/association "git_property_map" is-equal-to     \
+                git-rev       'detached'  has-commits   '0'  has-remotes   'no'  local-branch  'master'  nearest-root "$REPO"  remote-branch ''
+
+            assert/association "repo_status_staged" is-equal-to   \
+                add-len '0'  add-paths ''  del-len '0'  del-paths ''  mod-len '0'  mod-paths ''  ren-len '0'  ren-paths ''
+            assert/association "repo_status_unstaged" is-equal-to \
+                add-len '0'  add-paths ''  del-len '0'  del-paths ''  mod-len '0'  mod-paths ''  new-len '1'  new-paths 'test.txt'  ren-len '0'  ren-paths ''
+
+            \git add "$REPO/test.txt"                     || __fail "Couldn't git add test.txt"
             safe_execute -xr 0 -- command git fetch -q -a
             safe_execute -xr 0 -- fplib-git-details
             assert/association "git_property_map" is-equal-to git-rev "${git_property_map[git-rev]}" nearest-root "$PWD" has-remotes yes has-commits 1 \
@@ -302,6 +331,52 @@ if ! check_temp "$REPO" || ! check_temp "$REPO_ALT"; then __fail "Failed to crea
             assert/association "git_property_map" is-equal-to git-rev "${git_property_map[git-rev]}" nearest-root "$PWD" has-remotes yes has-commits 1 \
                 local-branch master     remote-branch origin/master     ahead-by 1 behind-by 2
 
+            wrap-fplib-git-details
+            assert/association "repo_status_staged" is-equal-to \
+                add-len   '1'        add-paths 'test.txt'       \
+                del-len   '0'        del-paths ''               \
+                mod-len   '0'        mod-paths ''               \
+                ren-len   '0'        ren-paths ''
+
+            assert/association "repo_status_unstaged" is-equal-to \
+                add-len   '0' add-paths ''                        \
+                del-len   '0' del-paths ''                        \
+                mod-len   '0' mod-paths ''                        \
+                new-len   '0' new-paths ''                        \
+                ren-len   '0' ren-paths ''
+
+            \git commit -m 'test commit' > /dev/null 2>&1 || __fail "Couldn't create test commit"
+
+            echo '$#/usr/bin/env zsh' > "$REPO/test.txt"
+
+            safe_execute -x -r 0 repo-details
+            # TODO: We're, effectively, ignoring the git-rev value, so it should probably be checked later
+            assert/association "git_property_map" is-equal-to \
+                git-rev       "${git_property_map[git-rev]}"  has-commits   '1'      \
+                has-remotes   'no'                            local-branch  'master' \
+                nearest-root  "$REPO"                         remote-branch 'master'
+
+            assert/association "repo_status_staged" is-equal-to \
+                add-len   '0' add-paths ''  \
+                del-len   '0' del-paths ''  \
+                mod-len   '0' mod-paths ''  \
+                ren-len   '0' ren-paths ''
+
+            assert/association "repo_status_unstaged" is-equal-to \
+                add-len   '0'        add-paths ''         \
+                del-len   '0'        del-paths ''         \
+                mod-len   '1'        mod-paths 'test.txt' \
+                new-len   '0'        new-paths ''         \
+                ren-len   '0'        ren-paths ''
+
+            pushd "$REPO_ALT"
+            {
+                safe_execute -x -r 0 repo-details
+                assert/association "git_property_map" is-equal-to    \
+                    git-rev       'detached'  has-commits   '0'      \
+                    has-remotes   'no'        local-branch  'master' \
+                    nearest-root  "$REPO_ALT"     remote-branch ''
+            } always { popd }
         } always { popd }
     }
 } always { (( IS_DIRTY == 0 )) && print -- 'clean ' || cleanup 'success' }
