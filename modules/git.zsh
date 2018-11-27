@@ -41,18 +41,19 @@ fplib-git-details() {
     git_status=( "${git_status[@]:#\#\# *}" )
 
     local -A prop_map=(
-        'nearest-root'      "${git_props[2]}"
-        'git-rev'           "${git_props[1]}"
-        'local-branch'      "${${${(M)REPO_CONFIG:#* on *}:+${REPO_CONFIG##* }}:-${REPO_CONFIG%%...*}}"
-        'remote-branch'     "${${${${(M)REPO_CONFIG:#*...*}:+[none]}:-${REPO_CONFIG##*...}}%%[[:space:]]\[*}"
-        'has-commits'       "${${${(M)REPO_CONFIG:#No commits yet on *}:+0}:-1}"
-        'has-remotes'       "${${${(M)${#git_remotes[@]}:#0}:+no}:-yes}"
-        'ahead-by'          "${${${(M)REPO_CONFIG:#*\[ahead*}:+${${REPO_CONFIG##*\[ahead[[:space:]]}%%[\],]*}}:-0}"
-        'behind-by'         "${${${(M)REPO_CONFIG:#*(\[|, )behind*}:+${${REPO_CONFIG##*(\[|, )behind[[:space:]]}%%[\],]*}}:-0}"
+        nearest-root  "${git_props[2]}"
+        git-rev       "${git_props[1]}"
+        local-branch  "${${${(M)REPO_CONFIG:#* on *}:+${REPO_CONFIG##* }}:-${REPO_CONFIG%%...*}}"
+        remote-branch "${${${${(M)REPO_CONFIG:#* on *}:+[none]}:-${REPO_CONFIG##*...}}%%[[:space:]\[]*}"
+        has-commits   "${${${(M)REPO_CONFIG:#No commits yet on *}:+0}:-1}"
+        has-remotes   "${${${(M)${#git_remotes[@]}:#0}:+no}:-yes}"
+        ahead-by      "${${${(M)REPO_CONFIG:#*\[ahead*}:+${${REPO_CONFIG##*\[ahead[[:space:]]}%%[\],]*}}:-0}"
+        behind-by     "${${${(M)REPO_CONFIG:#*(\[|, )behind*}:+${${REPO_CONFIG##*(\[|, )behind[[:space:]]}%%[\],]*}}:-0}"
     )
-    [[ "${prop_map[local-branch]}" != "${prop_map[local-branch]}" ]] || prop_map[remote-branch]=''
-    print -- "'$REPO_CONFIG' // '${${${(M)REPO_CONFIG:#*(\[|, )behind*}:+${${REPO_CONFIG##*(\[|, )behind[[:space:]]}%%[\],]*}}:-0}' /:/ ${${${(M)REPO_CONFIG:#*\[ahead*}:+${${REPO_CONFIG##*\[ahead[[:space:]]}%%[\],]*}}:-0}" > /dev/tty
-    #print -- "'$REPO_CONFIG' // '${${${(M)REPO_CONFIG:#*\[ahead*}:+${${REPO_CONFIG##*\[ahead[[:space:]]}%%\]}}:-0}'" > /dev/tty
+    # print -- "'$REPO_CONFIG' // '${${${${(M)REPO_CONFIG:#* on *}:+[none]}:-${REPO_CONFIG##*...}}%%[[:space:]\[]*}'" > /dev/tty
+    [[ "${prop_map[local-branch]}" != "${prop_map[remote-branch]}" ]] || prop_map[remote-branch]=''
+    # print -- "'$REPO_CONFIG' // '${${${(M)REPO_CONFIG:#*(\[|, )behind*}:+${${REPO_CONFIG##*(\[|, )behind[[:space:]]}%%[\],]*}}:-0}' /:/ ${${${(M)REPO_CONFIG:#*\[ahead*}:+${${REPO_CONFIG##*\[ahead[[:space:]]}%%[\],]*}}:-0}" > /dev/tty
+    # print -- "'$REPO_CONFIG' // '${${${(M)REPO_CONFIG:#*\[ahead*}:+${${REPO_CONFIG##*\[ahead[[:space:]]}%%\]}}:-0}'" > /dev/tty
 
 
     typeset -ga u_ren=( ${(@)${(M)git_status:#([AMDR ]R *)}##???} )  \

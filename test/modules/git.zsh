@@ -187,7 +187,7 @@ if ! check_temp "$REPO" || ! check_temp "$REPO_ALT"; then __fail "Failed to crea
             pushd "$REPO_ALT"; { assert/property-map git-rev detached has-commits 0 has-remotes no } always { popd }
         } always { popd }
     }
-    unit_group "empty-no-remote-add" "Git repositories with one added file" test_sections {
+    unit_group "empty-no-remote-add" "Git repo, one added file through to commit" test_sections {
         pushd "$REPO"
         {
             safe_execute -x -r 0 command git checkout -q -b master
@@ -195,56 +195,46 @@ if ! check_temp "$REPO" || ! check_temp "$REPO_ALT"; then __fail "Failed to crea
             fplib-git-details:locals
             assert/property-map git-rev detached has-commits 0 has-remotes no
             assert/clean-status staged
-            assert/association "repo_status_unstaged" is-equal-to \
-                add-len '0'  add-paths ''  del-len '0'  del-paths ''  mod-len '0'  mod-paths ''  new-len '1'  new-paths 'test.txt'  ren-len '0'  ren-paths ''
+            assert/repo-status unstaged new-len 1 new-paths test.txt
 
-            safe_execute -x -r 0 command git add "$REPO/test.txt"                     || __fail "Couldn't git add test.txt"
+            safe_execute -xr 0 -- command git add .
             assert/property-map git-rev detached has-commits 0 has-remotes no
-            assert/repo-status staged add-len 1 add-paths 'test.txt'
             assert/clean-status unstaged
+            assert/repo-status staged add-len 1 add-paths test.txt
 
-            safe_execute -xr 0 -- add-commit test.txt
-            refresh-git-details
-            assert/clean-status staged && assert/clean-status unstaged
-
-            print -- '$#/usr/bin/env zsh' > test.txt
-
+            safe_execute -xr 0 -- command git commit -m '.'
             assert/property-map has-remotes no
-            # TODO: We're, effectively, ignoring the git-rev value, so it should probably be checked later
+            assert/clean-status
+            print -- '$#/usr/bin/env zsh' > test.txt
+            assert/property-map has-remotes no
+            assert/clean-status staged && assert/repo-status unstaged mod-len 1 mod-paths 'test.txt'
 
-            assert/association "repo_status_staged" is-equal-to \
-                add-len   '0' add-paths ''  \
-                del-len   '0' del-paths ''  \
-                mod-len   '0' mod-paths ''  \
-                ren-len   '0' ren-paths ''
-
-            assert/association "repo_status_unstaged" is-equal-to \
-                add-len   '0'        add-paths ''         \
-                del-len   '0'        del-paths ''         \
-                mod-len   '1'        mod-paths 'test.txt' \
-                new-len   '0'        new-paths ''         \
-                ren-len   '0'        ren-paths ''
-
-            safe_execute -xr 0 command git remote add origin "$REPO_REMOTE" > /dev/null 2>&1
-            safe_execute -xr 0 command git push -q origin master
-            safe_execute -xr 0 command git branch --set-upstream-to=origin/master master
+            safe_execute -xr 0 -- command git remote add origin "$REPO_REMOTE" > /dev/null 2>&1
+            safe_execute -xr 0 -- command git push -q origin master
+            safe_execute -xr 0 -- command git branch --set-upstream-to=origin/master master
+            safe_execute -xr 0 -- command git commit -m '.'
+            assert/property-map has-remotes no
+            assert/clean-status
+        } always { popd }
+    }
+    unit_group "remote-ahead-behind" "Two repositories, various ahead/behind"  test_sections {
+        pushd "$REPO"
+        {
+            safe_execute -x -r 0 command git checkout -q -b master
+            touch test.txt
+            fplib-git-details:locals
+            safe_execute -xr 0 -- command git add .
+            safe_execute -xr 0 -- command git commit -m '.'
+            print -- '$#/usr/bin/env zsh' > test.txt
+            safe_execute -xr 0 -- command git remote add origin "$REPO_REMOTE" > /dev/null 2>&1
+            safe_execute -xr 0 -- command git push -q origin master
+            safe_execute -xr 0 -- command git branch --set-upstream-to=origin/master master
 
             pushd "$REPO_ALT"
             {
                 safe_execute -x -r 0 -- command git checkout --no-progress -qfB master
-                safe_execute -x -r 0 -- fplib-git-details
-                assert/association "git_property_map" is-equal-to            \
-                    git-rev       'detached'          has-commits   '0'      \
-                    has-remotes   'no'                local-branch  'master' \
-                    nearest-root  "$REPO_ALT"         remote-branch ''       \
-                    ahead-by      0                   behind-by     0
-
-                assert/association "repo_status_unstaged" is-equal-to \
-                    add-len   '0'        add-paths ''   \
-                    del-len   '0'        del-paths ''   \
-                    mod-len   '0'        mod-paths ''   \
-                    new-len   '0'        new-paths ''   \
-                    ren-len   '0'        ren-paths ''
+                assert/property-map git-rev detached has-commits 0 has-remotes no
+                assert/clean-status
 
                 safe_execute -xr 0 -- command git remote add origin "$REPO_REMOTE" > /dev/null 2>&1
                 safe_execute -xr 0 -- command git checkout -q -b master;
