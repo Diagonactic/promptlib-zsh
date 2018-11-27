@@ -184,6 +184,7 @@ unit_group "submodules" "Repo with remote and submodules"  test_sections {
             assert/clean-status staged
             assert/clean-status unstaged
             assert/property-map local-branch develop remote-branch origin/develop
+            safe_execute -xr 0 -- git push -q --set-upstream origin develop
         } always { popd }
         pushd "$REPO_ALT"
         {
@@ -197,12 +198,18 @@ unit_group "submodules" "Repo with remote and submodules"  test_sections {
             assert/clean-status staged
             assert/clean-status unstaged
             assert/property-map local-branch develop has-remotes yes remote-branch origin/develop
+            safe_execute -xr 0 -- git push -q --set-upstream origin develop
         } always { popd }
+
         pushd "$REPO"
         {
             repo-details:locals
             safe_execute -xr 0 -- repo-details
-            safe_execute -xr 0 -- \git submodule add "$REPO_ALT"
+            safe_execute -xr 0 -- \git submodule add -q -b develop "$REPO_REMOTE_ALT"
+            safe_execute -xr 0 -- \git add .gitmodules
+            safe_execute -xr 0 -- \git commit -m 'Add .gitmodules'
+            safe_execute -xr 0 -- \git push -q --set-upstream origin develop
+            safe_execute -xr 0 -- \git submodule update -q --init --recursive --remote
         } always { popd }
     } always { reset_test_repos }
 }
