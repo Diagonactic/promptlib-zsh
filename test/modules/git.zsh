@@ -5,53 +5,13 @@ declare -g SCRIPT_DIR="${SCRIPT_PATH:h}"
 clear
 
 source ../test.zsh
-
 source "../../modules/git.zsh"
+
+declare -g REPO{,_ALT,_REMOTE{,_ALT}}='';
 
 # Create test repositories
 pushdie() { pushd "$1" 2>/dev/null || __fail "Failed to change directory to $1" }
 
-alias return:cleanup-fail='() { (( $# == 1 )) && cleanup_fail "$1" || cleanup_fail }'
-# declare -i IS_DIRTY=0
-# cleanup() {
-#     (( $# >= 1 )) || __ut/die_usage 1 "Function $0: Expected 'fail' or 'success' as first parameter and (optional) message as second parameter"
-#     [[ "$1" == (success|fail)* ]] || __ut/die_usage 1 "Function $0: Expected 'fail' or 'success' as first parameter - got '$1'"
-#     local -ir IS_FAILURE="${${${(M)1:#fail*}:+1}:-0}"; shift
-#     [[ -z "${1:-}" ]] || { local -r MSG="${2:-}"; shift }
-
-#     safe-remove-test-repo() {
-#         print-result() {
-#             case "$IS_FAILURE" in
-#                 (0) (( ${+MSG} == 0 ))       || __success "$1"
-#                     (( ${+CLEAN_MSG} == 0 )) || { __print_fail "$CLEAN_MSG"; return 2 }
-#                     ;;
-#                 (1) (( ${+CLEAN_MSG} == 0 )) || 1+=$'\n\t - '"$CLEAN_MSG"
-#                     __print_fail "$1"
-#                     return 1
-#                     ;;
-#             esac
-#         }
-#         if (( $# != 1 )) || [[ -z "${1:-}" ]]; then __ut/die_usage 1 "Function $0: Expected path to remove"; fi
-#         local -r REPO="$1"
-#         {
-#             if [[ -d "$REPO" ]]; then
-#                 if [[ "$REPO" != '/' && "$REPO" != "$HOME/"* && "$REPO" == /* ]]; then
-#                     rm -rf "$REPO" || { local -r CLEAN_MSG="Failed to remove '$REPO'"; print-result; exit 1 }
-#                     return 0
-#                 fi
-#                 local -r CLEAN_MSG="Failed to remove '$REPO' - the path looked too dangerous to 'rm -rf'.  Remove it manually"
-#                 print-result && IS_DIRTY=0 || return $?
-#             else
-#                 if (( IS_FAILURE == 1 || ${+CLEAN_MSG} == 1 || ${+MSG} == 1 )); then
-#                         print-result || return $?
-#                 fi
-#             fi
-#         } always { IS_DIRTY=0 }
-#     }
-#     [[ -z "$REPO" ]]        || safe-remove-test-repo "$REPO"
-#     [[ -z "$REPO_ALT" ]]    || safe-remove-test-repo "$REPO_ALT"
-#     [[ -z "$REPO_REMOTE" ]] || safe-remove-test-repo "$REPO_REMOTE"
-# }
 reset_test_repos() {
     reset-repo() {
         [[ -n "$1" ]] || return 1
@@ -65,10 +25,8 @@ reset_test_repos() {
     }
     if [[ -z "$REPO" && -z "$REPO_ALT" && -z "$REPO_REMOTE" ]]; then return 0; fi
     __info "Resetting remote repositories"
-    reset-repo "$REPO" && REPO=''
-    reset-repo "$REPO_ALT" && REPO_ALT=''
-    reset-repo "$REPO_REMOTE" && REPO_REMOTE=''
-}
+    for REPONM in REPO{,_ALT,_REMOTE{,_ALT}}; do reset-repo "${(P)REPONM}" && typeset -g "$REPONM"=''; done
+ }
 
 init-repository() {
     [[ -d "$1" ]] || __fail "Function $0: The first parameter must be the path to the git repository"
@@ -95,7 +53,7 @@ create_test_repos() {
     local REPONM=''
     {
         IS_DIRTY=1
-        for REPONM in REPO{_ALT,_REMOTE{,_ALT}}; do make-temp-repo "$REPONM"; done
+        for REPONM in REPO{,_ALT,_REMOTE{,_ALT}}; do make-temp-repo "$REPONM"; done
     } always { (( TRY_BLOCK_ERROR == 0 )) || reset_test_repos }
 }
 yes_no() {
@@ -206,7 +164,7 @@ set-remote() {
     } always { popd }
 }
 # Create test repositories in /tmp
-declare -g REPO{_ALT,_REMOTE{,_ALT}}='';
+
 IS_DIRTY=1
 alias clean-conditional='(( IS_DIRTY == 0 )) && print -- "clean " || cleanup "success"'
 
@@ -218,7 +176,7 @@ unit_group "submodules" "Repo with remote and submodules"  test_sections {
         {
             repo-details:locals
             safe_execute -xr 0 -- \git checkout -q -b develop
-            echo "foo" > "$REPO/root-module.txt"
+            echo "foo" > "root-module.txt"
             safe_execute -xr 0 -- \git add .
             safe_execute -xr 0 -- \git commit -m 'Create root repository with single root-module.txt file'
             set-remote "$REPO" develop
@@ -226,6 +184,25 @@ unit_group "submodules" "Repo with remote and submodules"  test_sections {
             assert/clean-status staged
             assert/clean-status unstaged
             assert/property-map local-branch develop remote-branch origin/develop
+        } always { popd }
+        pushd "$REPO_ALT"
+        {
+            repo-details:locals
+            safe_execute -xr 0 -- \git checkout -q -b develop
+            echo "bar" > "sub-module.txt"
+            safe_execute -xr 0 -- \git add .
+            safe_execute -xr 0 -- \git commit -m 'Create submodule repository with single sub-module.txt file'
+            set-remote "$REPO_ALT" develop "$REPO_REMOTE_ALT"
+            safe_execute -xr 0 -- repo-details
+            assert/clean-status staged
+            assert/clean-status unstaged
+            assert/property-map local-branch develop has-remotes yes remote-branch origin/develop
+        } always { popd }
+        pushd "$REPO"
+        {
+            repo-details:locals
+            safe_execute -xr 0 -- repo-details
+            safe_execute -xr 0 -- \git submodule add "$REPO_ALT"
         } always { popd }
     } always { reset_test_repos }
 }

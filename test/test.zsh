@@ -73,7 +73,7 @@ function __ut/parameter/is_defined,{is_basetype{,_or_unset}/{scalar,array,intege
     esac
 }
 
-__ut/ans() > /dev/tty { set +x
+__ut/ans() > /dev/tty {
     __echo() {
         if   [[ "$1" =~ '^([0-9]+;)?[0-9]+$' ]];  then 1=$'\e'"[$1m"
         elif [[ "$1" =~ '^([0-9]+;)?[0-9]+m$' ]]; then 1=$'\e'"[$1";   fi
@@ -120,16 +120,16 @@ __b() {
         [[ "${#2}" -gt 1 ]] && __ut/clr 1 $@ || __ut/clr 1 "9$2"
     }
 }
-__successmark() {
+__successmark() > /dev/tty {
     __ut/ans "1;92" "    ✓ " "1;32" "Success" "0;32" " - "
 }
-__success() {
+__success() > /dev/tty {
     __successmark && __ut/ans "1;37" "$1\n"
 }
-__failmark() {
+__failmark() > /dev/tty {
     __ut/ans "1;91" "    ꕔ " "1;31" "Failure" "0;31" " - "
 }
-__print_fail() {
+__print_fail() > /dev/tty {
     __failmark
     if [[ $# -eq 2 ]]; then
         __ut/ans "1;37" "Expected '" "4;32" "$1" "1;37" "'; got '" "4;31" "$2" "1;37" "'"
@@ -144,10 +144,13 @@ __print_fail() {
     local -a ltrace=( "${${funcfiletrace[@]:$_x}[@]##*:}" )
     local -a tracear=( "${(@A)${${funcfiletrace[@]:$_x}[@]%:*}:^^ltrace}" )
     print -n -- $'\e[0;91m           in   '
-    printf $'\e[4;96m%s\e[0;1;90m:\e[1;96m%s ' "${tracear[@]}"
+    printf $'\e[4;96m%s\e[0;1;90m:\e[1;96m%s ' "${tracear[@]##$PROJECT_DIR/}"
     #print $'\e[4;96m${funcfiletrace[$_x]%%:*}\e[0;1;90m:\e[1;96m${funcfiletrace[$_x]##*:}'
 }
-__fail() {
+__info() > /dev/tty {
+    __ut/ans "1;95" "    ⭓    Info - $1"$'\n'
+}
+__fail() > /dev/tty {
     __print_fail "$@"
     print
     exit 1
@@ -632,16 +635,17 @@ function safe_execute {
     function str/contains { [[ "${1%%${2-}*}" != "$1" ]]; }
 
     local -i {OPTIND,SKIP_SUBSHELL,NO_CLIP}=0 EXPECTED_RC=-1
-    local REFVAR_FROM_CLI='' EXPECTED_REFVAR_VALUE='' RV_TYPE=''
+    local REFVAR_FROM_CLI='' EXPECTED_REFVAR_VALUE='' RV_TYPE='' TARGET_PATH=''
     local -a typeset_refvar_from_cli=( "local" '' '' )
 
-    while getopts xcr:o:e:v: OPT; do
+    while getopts xcr:o:e:v:p: OPT; do
         case "$OPT" in
             (r) EXPECTED_RC="$OPTARG" ;;
             (o) [[ "$OPTARG" == *$'\n'* ]] && expected_stdout=( "${(@f)OPTARG}" ) || expected_stdout=( "$OPTARG" ) ;;
             (e) [[ "$OPTARG" == *$'\n'* ]] && expected_stderr=( "${(@f)OPTARG}" ) || expected_stderr=( "$OPTARG" ) ;;
             (v) EXPECTED_REFVAR_VALUE="$OPTARG" ;;
             (x) SKIP_SUBSHELL=1 ;;
+            (p) TARGET_PATH="$OPTARG";  [[ -d "$OPTARG" ]] || __fail "Path $OPTARG does not exist (set as target path for $0)" ;;
             (c) NO_CLIP=1
         esac
     done
@@ -698,26 +702,51 @@ function safe_execute {
             echo "${(F)${(P)REFVAR_FROM_CLI}}" > "$VAROUT"
         }
         {
-            if (( SKIP_SUBSHELL )); then
-                "${last_executed[@]}" > "$TSTDOUT" 2> "$TSTDERR"; RC=$?
-            else
-                if [[ -n "$EXPECTED_REFVAR_VALUE" ]]; then
-                    ( subshell_var_capture ); RC=$?; ACTUAL_REFVAR_VALUE="$(<$VAROUT)"
+            [[ -z "$TARGET_PATH" ]] || pushd "$TARGET_PATH"
+            {
+                if (( SKIP_SUBSHELL )); then
+                    "${last_executed[@]}" > "$TSTDOUT" 2> "$TSTDERR"; RC=$?
                 else
-                    ( "${last_executed[@]}" > "$TSTDOUT" 2> "$TSTDERR" ); RC=$?
+                    if [[ -n "$EXPECTED_REFVAR_VALUE" ]]; then
+                        ( subshell_var_capture ); RC=$?; ACTUAL_REFVAR_VALUE="$(<$VAROUT)"
+                    else
+                        ( "${last_executed[@]}" > "$TSTDOUT" 2> "$TSTDERR" ); RC=$?
+                    fi
+                    std_err=( "${(f@)$(<$TSTDERR)}" )
                 fi
-                std_err=( "${(f@)$(<$TSTDERR)}" )
-            fi
-            std_out=( "${(f@)$(<$TSTDOUT)}" )
-
+                std_out=( "${(f@)$(<$TSTDOUT)}" )
+            } always {
+                [[ -z "$TARGET_PATH" ]] || popd
+            }
         } always { restore_runtime_vals }
     } always {
         rm "$TSTDOUT"
         if [[ -n "$VAROUT" ]]; then rm "$VAROUT"; fi
         if (( SKIP_SUBSHELL == 0 )); then rm "$TSTDERR"; fi
     }
-
-    (( EXPECTED_RC == -1 )) || { () { return $RC }; assert/return "${(j: :)last_executed[@]}" $EXPECTED_RC }
+    local CALLNAME="${last_executed[1]}"
+    local CLISTR="${${(j<\e[0m \e[0;37m>)last_executed[@]}#* }"
+    (( EXPECTED_RC == -1 )) || {
+        if (( EXPECTED_RC != RC )); then
+            __failmark; print --     $'\e[0;37mCommandline     : \e[1;4;35m'"$CALLNAME"$'\e[0m \e[0;4;37m'"$CLISTR"
+            print -- $'                \e[0;37mTarget Directory: \e[1;97m'"${TARGET_PATH:-$PWD}"
+            if [[ -n "$std_err" || -n "$std_out" ]]; then
+                (( ${#std_out[@]} == 0 )) || {
+                    print -- $'\n            \e[0;37mOutput:'
+                    print -l -- "${std_out[@]}"
+                }
+                (( ${#std_err[@]} == 0 )) || {
+                    print -- $'\n            \e[0;37mOutput to \e[1;91mstderr\e[0;37m:'
+                    print -l -- "${std_err[@]}"
+                }
+            else
+                print -- $'                \e[0;4;37mProgram produced no output\e[0m'
+            fi
+            __fail "Expected return code of '$EXPECTED_RC'; got '$RC'"
+        else
+            () { return $RC }; assert/return "${(j< >)last_executed[@]}" "$EXPECTED_RC"
+        fi
+    }
     [[ -z "$EXPECTED_REFVAR_VALUE" ]] || {
         assert/$RV_TYPE ACTUAL_REFVAR_VALUE is-equal-to "${EXPECTED_REFVAR_VALUE}"
     }
