@@ -139,6 +139,12 @@ __print_fail() {
         __ut/ans "1;37" "$1"
     fi
     __ut/ans "0;37" $'\n'
+    #set -x
+    setopt localoptions extendedglob
+    local -i _x=$(( ${funcfiletrace[(I)*test.zsh*]} + 2 )) _t="${#funcfiletrace[@]}"
+    local -a a=( "${funcfiletrace[@]}" )
+    set +x
+    print -- "\e[0;91m           in   \e[4;96m${funcfiletrace[$_x]%%:*}\e[0;1;90m:\e[1;96m${funcfiletrace[$_x]##*:}"
 }
 __fail() {
     __print_fail "$@"

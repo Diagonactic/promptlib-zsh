@@ -1,6 +1,11 @@
 #!/bin/zsh
+declare -g SCRIPT_PATH="${${(%):-%x}:A}"
+declare -g SCRIPT_DIR="${SCRIPT_PATH:h}"
+
 clear
+pushd "$SCRIPT_DIR"
 source ../test.zsh
+
 source "../../modules/git.zsh"
 
 # Create test repositories
@@ -14,7 +19,7 @@ cleanup() {
     [[ -z "${1:-}" ]] || { local -r MSG="${2:-}"; shift }
 
     safe-remove-test-repo() {
-        print-cleanup-result() {
+        print-result() {
             case "$IS_FAILURE" in
                 (0) (( ${+MSG} == 0 ))       || __success "$1"
                     (( ${+CLEAN_MSG} == 0 )) || { __print_fail "$CLEAN_MSG"; return 2 }
@@ -30,14 +35,14 @@ cleanup() {
         {
             if [[ -d "$REPO" ]]; then
                 if [[ "$REPO" != '/' && "$REPO" != "$HOME/"* && "$REPO" == /* ]]; then
-                    rm -rf "$REPO" || { local -r CLEAN_MSG="Failed to remove '$REPO'"; print-cleanup-result; exit 1 }
+                    rm -rf "$REPO" || { local -r CLEAN_MSG="Failed to remove '$REPO'"; print-result; exit 1 }
                     return 0
                 fi
                 local -r CLEAN_MSG="Failed to remove '$REPO' - the path looked too dangerous to 'rm -rf'.  Remove it manually"
-                print-cleanup-result && IS_DIRTY=0 || return $?
+                print-result && IS_DIRTY=0 || return $?
             else
                 if (( IS_FAILURE == 1 || ${+CLEAN_MSG} == 1 || ${+MSG} == 1 )); then
-                        print-cleanup-result || return $?
+                        print-result || return $?
                 fi
             fi
         } always { IS_DIRTY=0 }
@@ -121,19 +126,19 @@ add-commit() {
     git add . && git commit -m '.'
 }
 check_temp() { [[ -n "$1" && -d "$1" ]]; }
-wrap-fplib-git-details() safe_execute -x -r 0 repo-details
+wrap-repo-details() safe_execute -x -r 0 repo-details
 wait_key() { print '... stopping ...'; read -k1 -s }
 check-repo-props() {
-    safe_execute -xr 0 -- fplib-git-details
+    safe_execute -xr 0 -- repo-details
     assert/association git_property_map is-equal-to git-rev "${git_property_map[git-rev]}" nearest-root "$PWD" has-remotes yes has-commits 1 local-branch "${1:-master}" remote-branch "origin/${1:-master}" ahead-by "${2:-0}" behind-by "${3:-0}"
 }
 assert/repo-status() {
-    safe_execute -xr 0 -- fplib-git-details
+    safe_execute -xr 0 -- repo-details
     (( $# > 1 )) || __fail "$0: Invalid Usage - Requires an even number of properties"
     local TGT="$1"; shift
 
     (( $# % 2 == 0 )) || __fail "$0: Invalid Usage - Requires an even number of properties"
-    safe_execute -xr 0 -- fplib-git-details
+    safe_execute -xr 0 -- repo-details
     {
         local -A provided_props=( "$@" ) expected_props=( add-len 0 add-paths '' del-len 0 del-paths '' mod-len 0 mod-paths '' ren-len 0 ren-paths '' )
         [[ "$TGT" == staged ]] || expected_props+=( new-len 0 new-paths '' )
@@ -147,7 +152,7 @@ assert/repo-status() {
 }
 assert/property-map() {
     (( $# % 2 == 0 )) || __fail "$0: Invalid Usage - Requires an even number of properties"
-    safe_execute -xr 0 -- fplib-git-details
+    safe_execute -xr 0 -- repo-details
     {
         local -A provided_props=( "$@" ) expected_props=(
                 git-rev      "${git_property_map[git-rev]}"  nearest-root  "$PWD"
@@ -178,19 +183,13 @@ if ! check_temp "$REPO" || ! check_temp "$REPO_ALT"; then __fail "Failed to crea
         pushd "$REPO"
         {
             repo-details:locals
-            safe_execute -x -r 0 repo-details
-
-            assert/association "git_property_map" is-equal-to    \
-                git-rev       'detached'  has-commits   '0'      \
-                has-remotes   'no'        local-branch  'master' \
-                nearest-root  "$REPO"     remote-branch ''
+            assert/property-map git-rev detached has-commits 0 has-remotes no
+            assert/clean-status staged
+            assert/clean-status unstaged
             pushd "$REPO_ALT"
             {
                 safe_execute -x -r 0 repo-details
-                assert/association "git_property_map" is-equal-to    \
-                    git-rev       'detached'  has-commits   '0'      \
-                    has-remotes   'no'        local-branch  'master' \
-                    nearest-root  "$REPO_ALT"     remote-branch ''
+                assert/property-map git-rev detached has-commits 0 has-remotes no
             } always { popd }
         } always { popd }
     }
@@ -199,7 +198,7 @@ if ! check_temp "$REPO" || ! check_temp "$REPO_ALT"; then __fail "Failed to crea
         {
             safe_execute -x -r 0 command git checkout -q -b master
             touch "$REPO/test.txt"
-            fplib-git-details:locals
+            repo-details:locals
             assert/property-map git-rev detached has-commits 0 has-remotes no
             assert/clean-status staged
             assert/repo-status unstaged new-len 1 new-paths test.txt
@@ -219,8 +218,8 @@ if ! check_temp "$REPO" || ! check_temp "$REPO_ALT"; then __fail "Failed to crea
             safe_execute -xr 0 -- command git remote add origin "$REPO_REMOTE" > /dev/null 2>&1
             safe_execute -xr 0 -- command git push -q origin master
             safe_execute -xr 0 -- command git branch --set-upstream-to=origin/master master
-            safe_execute -xr 0 -- command git commit -m '.'
-            assert/property-map has-remotes no
+            safe_execute -xr 0 -- \git commit -am .
+            assert/property-map has-remotes yes ahead-by 1
             assert/clean-status
         } always { popd }
     }
@@ -229,7 +228,7 @@ if ! check_temp "$REPO" || ! check_temp "$REPO_ALT"; then __fail "Failed to crea
         {
             safe_execute -x -r 0 command git checkout -q -b master
             touch test.txt
-            fplib-git-details:locals
+            repo-details:locals
             safe_execute -xr 0 -- command git add .
             safe_execute -xr 0 -- command git commit -m '.'
             print -- '$#/usr/bin/env zsh' > test.txt
@@ -254,7 +253,7 @@ if ! check_temp "$REPO" || ! check_temp "$REPO_ALT"; then __fail "Failed to crea
                 safe_execute -xr 0 -- command git branch --set-upstream-to=origin/master master
 
                 safe_execute -x -r 0 command git fetch -q
-                safe_execute -x -r 0 fplib-git-details
+                safe_execute -x -r 0 repo-details
                 assert/association "git_property_map" is-equal-to \
                     git-rev       "${git_property_map[git-rev]}" has-commits   1              \
                     has-remotes   yes                            local-branch  master         \
@@ -269,7 +268,7 @@ if ! check_temp "$REPO" || ! check_temp "$REPO_ALT"; then __fail "Failed to crea
                     ren-len   '0'        ren-paths ''
 
                 safe_execute -xr 0 -- add-commit boo.txt
-                safe_execute -xr 0 -- fplib-git-details
+                safe_execute -xr 0 -- repo-details
 
                 assert/association "git_property_map" is-equal-to \
                     git-rev       "${git_property_map[git-rev]}" has-commits   1              \
@@ -288,7 +287,7 @@ if ! check_temp "$REPO" || ! check_temp "$REPO_ALT"; then __fail "Failed to crea
             pushd "$REPO_ALT"
             {
                 safe_execute -xr 0 -- command git fetch -q
-                safe_execute -x -r 0 -- fplib-git-details
+                safe_execute -x -r 0 -- repo-details
                 assert/association "git_property_map" is-equal-to \
                     git-rev       "${git_property_map[git-rev]}" has-commits   1              \
                     has-remotes   yes                            local-branch  master         \
@@ -296,7 +295,7 @@ if ! check_temp "$REPO" || ! check_temp "$REPO_ALT"; then __fail "Failed to crea
                     ahead-by      1                              behind-by     1
 
                 safe_execute -xr 0 -- command git pull -q
-                safe_execute -xr 0 -- fplib-git-details
+                safe_execute -xr 0 -- repo-details
 
                 assert/association "git_property_map" is-equal-to git-rev "${git_property_map[git-rev]}" nearest-root "$PWD" has-remotes yes has-commits 1 \
                     local-branch master     remote-branch origin/master     ahead-by 2 behind-by 0
@@ -311,7 +310,7 @@ if ! check_temp "$REPO" || ! check_temp "$REPO_ALT"; then __fail "Failed to crea
         {
             touch "$REPO/test.txt"
             repo-details:locals
-            wrap-fplib-git-details
+            wrap-repo-details
             assert/association "git_property_map" is-equal-to     \
                 git-rev       'detached'  has-commits   '0'  has-remotes   'no'  local-branch  'master'  nearest-root "$REPO"  remote-branch ''
 
@@ -322,16 +321,16 @@ if ! check_temp "$REPO" || ! check_temp "$REPO_ALT"; then __fail "Failed to crea
 
             \git add "$REPO/test.txt"                     || __fail "Couldn't git add test.txt"
             safe_execute -xr 0 -- command git fetch -q -a
-            safe_execute -xr 0 -- fplib-git-details
+            safe_execute -xr 0 -- repo-details
             assert/association "git_property_map" is-equal-to git-rev "${git_property_map[git-rev]}" nearest-root "$PWD" has-remotes yes has-commits 1 \
                 local-branch master     remote-branch origin/master     ahead-by 0 behind-by 2
             echo 'blah' > baz.txt
             safe_execute -xr 0 -- add-commit
-            safe_execute -xr 0 -- fplib-git-details
+            safe_execute -xr 0 -- repo-details
             assert/association "git_property_map" is-equal-to git-rev "${git_property_map[git-rev]}" nearest-root "$PWD" has-remotes yes has-commits 1 \
                 local-branch master     remote-branch origin/master     ahead-by 1 behind-by 2
 
-            wrap-fplib-git-details
+            wrap-repo-details
             assert/association "repo_status_staged" is-equal-to \
                 add-len   '1'        add-paths 'test.txt'       \
                 del-len   '0'        del-paths ''               \
