@@ -146,8 +146,10 @@ assert/property-map() {
 
 assert/clean-status() {
     case "${1:-both}" in
-        (unstaged|both)  assert/association repo_status_unstaged is-equal-to add-len 0 add-paths '' del-len 0 del-paths '' mod-len 0 mod-paths '' ren-len 0 ren-paths '' new-len 0 new-paths '' ;|
-        (staged|both)    assert/association repo_status_staged is-equal-to add-len 0 add-paths '' del-len 0 del-paths '' mod-len 0 mod-paths '' ren-len 0 ren-paths '' ;;
+        (unstaged)  assert/association repo_status_unstaged "$@" new-len 0 new-paths '' ;;
+        (staged)    assert/association repo_status_staged   is-equal-to add-len 0 add-paths '' del-len 0 del-paths '' mod-len 0 mod-paths '' ren-len 0 ren-paths '' ;;
+        (both)      assert/clean-status staged && assert/clean-status unstaged ;;
+        (*)         __fail "Unknown repo type: ${1:-both}"
     esac
 }
 wait4it() {
@@ -372,4 +374,3 @@ unit_group "remote-ahead-behind" "Two repositories, various ahead/behind"  test_
         } always { popd }
     } always { reset_test_repos }
 }
-
