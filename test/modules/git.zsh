@@ -1,11 +1,12 @@
-#!/bin/zsh
+#!/usr/bin/env zsh
+
 declare -g SCRIPT_PATH="${${(%):-%x}:A}"
 declare -g PROJECT_DIR="${SCRIPT_PATH:h:h:h}"
 declare -g SCRIPT_DIR="${SCRIPT_PATH:h}"
 clear
 
-source ../test.zsh
-source "../../modules/git.zsh"
+source "$PROJECT_DIR/test/test.zsh"
+source "$PROJECT_DIR/modules/git.zsh"
 
 declare -g REPO{,_ALT,_REMOTE{,_ALT}}='';
 
@@ -47,33 +48,27 @@ create_test_repos() {
         {
             "${cmd[@]}"
         } always { (( TRY_BLOCK_ERROR == 0 )) || reset_test_repos }
-        declare -g "$1"="$2"
+        typeset -g "$1"="$2"
         __info "Created $1 repository at $2"
     }
     local REPONM=''
     {
         IS_DIRTY=1
         for REPONM in REPO{,_ALT,_REMOTE{,_ALT}}; do make-temp-repo "$REPONM"; done
+        typeset -g REPO_SMOD_NAME="submodule-repo-alt"; typeset -g REPO_SMOD_PATH="$REPO/$REPO_SMOD_NAME"
     } always { (( TRY_BLOCK_ERROR == 0 )) || reset_test_repos }
 }
-yes_no() {
-    print_value "$1" "${${${(M)2:#1}:+yes}:-no}"
-}
-print_value() {
-    print -- "${(r.20.)1}: '$2'"
-}
+
+yes_no() { print_value "$1" "${${${(M)2:#1}:+yes}:-no}" }
+print_value() { print -- "${(r.20.)1}: '$2'" }
 print_values() {
-    # print -l "${(kv)git_property_map[@]}"
-    # local KEY=''
-    # for KEY in "${(k)git_property_map[@]}"; do
-    #     print -- "k:'$KEY' -:- v:'${git_property_map[$KEY]}'"
-    # done
     if (( ${#git_remotes[@]} > 0 )); then
         __ut/center $'\e[4;36m Remotes \e[0;37m' '-'
         __dump_array 7 "${git_remotes[@]}"
     else
         print -- "No Remotes"
     fi
+
     if (( ${#${(kv)repo_status_unstaged[@]}} > 0 )); then
         __ut/center $' \e[4;36m Unstaged Status \e[0;37m ' '-'
         __dump_assoc 7 repo_status_unstaged
@@ -93,65 +88,53 @@ print_values() {
     fi
 
     print_value "Remote Branch" ${git_property_map[remote-branch]}
-    print_value "Local Branch" ${git_property_map[local-branch]}
-    print_value "Nearest Root" ${git_property_map[nearest-root]}
-    print_value "Rev" ${git_property_map[git-rev]}
-    yes_no      "Has Commits" ${git_property_map[has-commits]}
-    yes_no      "Has Remotes" ${git_property_map[has-remotes]}
+    print_value "Local Branch"  ${git_property_map[local-branch]}
+    print_value "Nearest Root"  ${git_property_map[nearest-root]}
+    print_value "Rev"           ${git_property_map[git-rev]}
+    yes_no      "Has Commits"   ${git_property_map[has-commits]}
+    yes_no      "Has Remotes"   ${git_property_map[has-remotes]}
 }
+
 add-commit() {
     (( $# == 0 )) || { print -- "serenity-now-$RANDOM" >> "$1" || return 1 }
     git add . && git commit -m '.'
 }
-check_temp() { [[ -n "$1" && -d "$1" ]]; }
-wrap-repo-details() safe_execute -x -r 0 repo-details
-wait_key() { print '... stopping ...'; read -k1 -s }
-check-repo-props() {
-    safe_execute -xr 0 -- repo-details
-    assert/association git_property_map is-equal-to git-rev "${git_property_map[git-rev]}" nearest-root "$PWD" has-remotes yes has-commits 1 local-branch "${1:-master}" remote-branch "origin/${1:-master}" ahead-by "${2:-0}" behind-by "${3:-0}"
-}
+
+wrap-repo-details() { safe_execute -xsr 0 repo-details }
+
+typeset -Ar empty_staged=( add-len 0 add-paths '' del-len 0 del-paths '' mod-len 0 mod-paths '' ren-len 0 ren-paths '' ) \
+          empty_unstaged=( add-len 0 add-paths '' del-len 0 del-paths '' mod-len 0 mod-paths '' ren-len 0 ren-paths '' new-len 0 new-paths '' )
+
 assert/repo-status() {
-    safe_execute -xr 0 -- repo-details
-    (( $# > 1 )) || __fail "$0: Invalid Usage - Requires an even number of properties"
-    local TGT="$1"; shift
-
-    (( $# % 2 == 0 )) || __fail "$0: Invalid Usage - Requires an even number of properties"
-    safe_execute -xr 0 -- repo-details
-    {
-        local -A provided_props=( "$@" ) expected_props=( add-len 0 add-paths '' del-len 0 del-paths '' mod-len 0 mod-paths '' ren-len 0 ren-paths '' )
-        [[ "$TGT" == staged ]] || expected_props+=( new-len 0 new-paths '' )
-        local __; for __ in "${(k)provided_props[@]}"; do expected_props[$__]="${provided_props[$__]}"; done
-
-        case "$TGT" in
-            (staged)    assert/association repo_status_staged   is-equal-to "${(kv)expected_props[@]}"  ;;
-            (unstaged)  assert/association repo_status_unstaged is-equal-to "${(kv)expected_props[@]}"  ;;
-        esac
-    } always { assert/return "$0" 0 }
+    (( $# % 2 == 1 )) || __fail "$0: Invalid Usage - Requires 'staged' or 'unstaged' followed by an even number of properties"
+    safe_execute -xsr 0 -- repo-details
+    local -A expected_props=( "${(kvP@)${:-empty_$1}}" "${${@:2}[@]}" ) # empty_(un)?staged[@] replaced with $@ keys
+    assert/association "repo_status_$1" is-equal-to "${(kv)expected_props[@]}"
 }
 assert/property-map() {
     (( $# % 2 == 0 )) || __fail "$0: Invalid Usage - Requires an even number of properties"
-    safe_execute -xr 0 -- repo-details
-    {
-        local -A provided_props=( "$@" ) expected_props=(
-                git-rev      "${git_property_map[git-rev]}"  nearest-root  "$PWD"
-                has-remotes  yes                             has-commits   1
-                local-branch master                          remote-branch origin/master
-                ahead-by     0                               behind-by     0
-            )
-        local __; for __ in "${(k)provided_props[@]}"; do expected_props[$__]="${provided_props[$__]}"; done
-        [[ "${expected_props[has-remotes]}" == "yes" ]] || expected_props[remote-branch]=''
-        assert/association git_property_map is-equal-to "${(kv)expected_props[@]}"
-    } always { assert/return 'assert/property-map' 0 }
+    safe_execute -xsr 0 -- repo-details
+    local -A expected_props=(
+            git-dir      .git     git-rev       "${git_property_map[git-rev]}"
+            is-submodule 0        parent-repo   ''
+            has-remotes  yes      has-commits   1
+            local-branch master   remote-branch origin/master
+            ahead-by     0        behind-by     0
+            nearest-root "$PWD"   is-bare       0
+    )
+    expected_props+=( "$@" )
+    local -A b=( "${(kv@)expected_props[@]}" )
+    [[ "${expected_props[has-remotes]}" == "yes" ]] || expected_props[remote-branch]=''
+    assert/association git_property_map is-equal-to "${(kv)expected_props[@]}"
 }
-
 assert/clean-status() {
     case "${1:-both}" in
-        (unstaged)  assert/association repo_status_unstaged "$@" new-len 0 new-paths '' ;;
-        (staged)    assert/association repo_status_staged   is-equal-to add-len 0 add-paths '' del-len 0 del-paths '' mod-len 0 mod-paths '' ren-len 0 ren-paths '' ;;
-        (both)      assert/clean-status staged && assert/clean-status unstaged ;;
+        (staged|unstaged)  assert/repo-status "$1" ;;
+        (both)      assert/repo-status staged && assert/repo-status unstaged ;;
         (*)         __fail "Unknown repo type: ${1:-both}"
     esac
 }
+
 wait4it() {
     print "Waiting for input: "
     print "REPO              : $REPO\nREPO_ALT          : $REPO_ALT\nREPO_REMOTE       : $REPO_REMOTE\nCurrent Directory : $PWD"
@@ -177,41 +160,46 @@ unit_group "submodules" "Repo with remote and submodules"  test_sections {
         pushd "$REPO"
         {
             repo-details:locals
-            safe_execute -xr 0 -- \git checkout -q -b develop
+            safe_execute -xsr 0 -- \git checkout -q -b develop
             echo "foo" > "root-module.txt"
-            safe_execute -xr 0 -- \git add .
-            safe_execute -xr 0 -- \git commit -m 'Create root repository with single root-module.txt file'
+            safe_execute -xsr 0 -- \git add .
+            safe_execute -xsr 0 -- \git commit -m 'Create root repository with single root-module.txt file'
             set-remote "$REPO" develop
-            safe_execute -xr 0 -- repo-details
-            assert/clean-status staged
-            assert/clean-status unstaged
             assert/property-map local-branch develop remote-branch origin/develop
+            assert/clean-status
             safe_execute -xr 0 -- git push -q --set-upstream origin develop
         } always { popd }
+
         pushd "$REPO_ALT"
         {
             repo-details:locals
-            safe_execute -xr 0 -- \git checkout -q -b develop
+            safe_execute -xsr 0 -- \git checkout -q -b develop
             echo "bar" > "sub-module.txt"
-            safe_execute -xr 0 -- \git add .
-            safe_execute -xr 0 -- \git commit -m 'Create submodule repository with single sub-module.txt file'
+            safe_execute -xsr 0 -- \git add .
+            safe_execute -xsr 0 -- \git commit -m 'Create submodule repository with single sub-module.txt file'
             set-remote "$REPO_ALT" develop "$REPO_REMOTE_ALT"
-            safe_execute -xr 0 -- repo-details
-            assert/clean-status staged
-            assert/clean-status unstaged
+            safe_execute -xsr 0 -- repo-details
+            assert/clean-status
             assert/property-map local-branch develop has-remotes yes remote-branch origin/develop
-            safe_execute -xr 0 -- git push -q --set-upstream origin develop
+            safe_execute -xsr 0 -- git push -q --set-upstream origin develop
         } always { popd }
 
         pushd "$REPO"
         {
             repo-details:locals
-            safe_execute -xr 0 -- repo-details
-            safe_execute -xr 0 -- \git submodule add -q -b develop "$REPO_REMOTE_ALT"
-            safe_execute -xr 0 -- \git add .gitmodules
-            safe_execute -xr 0 -- \git commit -m 'Add .gitmodules'
-            safe_execute -xr 0 -- \git push -q --set-upstream origin develop
-            safe_execute -xr 0 -- \git submodule update -q --init --recursive --remote
+            safe_execute -xsr 0 -- \git submodule add -q -b develop "$REPO_REMOTE_ALT" submodule-repo-alt
+            safe_execute -xsr 0 -- \git add .gitmodules
+            safe_execute -xsr 0 -- \git commit -m 'Add .gitmodules'
+            safe_execute -xsr 0 -- \git push -q --set-upstream origin develop
+            safe_execute -xsr 0 -- \git submodule update -q --init --recursive --remote
+            assert/property-map local-branch develop has-remotes yes remote-branch origin/develop
+            assert/association repo_submodule_branches is-equal-to "$REPO_SMOD_PATH" develop
+        } always { popd }
+
+        pushd "$REPO_SMOD_PATH"
+        {
+            repo-details:locals
+            assert/property-map local-branch develop has-remotes yes remote-branch origin/develop git-dir "$REPO/.git/modules/$REPO_SMOD_NAME" is-submodule 1 parent-repo "$REPO"
         } always { popd }
     } always { reset_test_repos }
 }
@@ -227,40 +215,40 @@ unit_group "empty-no-remote" "Check empty, but valid, git repostiory properties 
             assert/clean-status unstaged
             pushd "$REPO_ALT"
             {
-                safe_execute -x -r 0 repo-details
+                safe_execute -xsr 0 repo-details
                 assert/property-map git-rev detached has-commits 0 has-remotes no
             } always { popd }
         } always { popd }
     } always { reset_test_repos }
 }
+
 unit_group "empty-no-remote-add" "Git repo, one added file through to commit" test_sections {
     create_test_repos
     {
         pushdie "$REPO"
         {
-            safe_execute -x -r 0 \git checkout -q -b master
+            safe_execute -xsr 0 \git checkout -q -b master
             touch "$REPO/test.txt"
             repo-details:locals
             assert/property-map git-rev detached has-commits 0 has-remotes no
             assert/clean-status staged
             assert/repo-status unstaged new-len 1 new-paths test.txt
-
-            safe_execute -xr 0 -- \git add .
+            safe_execute -xsr 0 -- \git add .
             assert/property-map git-rev detached has-commits 0 has-remotes no
             assert/clean-status unstaged
             assert/repo-status staged add-len 1 add-paths test.txt
 
-            safe_execute -xr 0 -- \git commit -m '.'
+            safe_execute -xsr 0 -- \git commit -m '.'
             assert/property-map has-remotes no
             assert/clean-status
             print -- '$#/usr/bin/env zsh' > test.txt
             assert/property-map has-remotes no
             assert/clean-status staged && assert/repo-status unstaged mod-len 1 mod-paths 'test.txt'
 
-            safe_execute -xr 0 -- \git remote add origin "$REPO_REMOTE" > /dev/null 2>&1
-            safe_execute -xr 0 -- \git push -q origin master
-            safe_execute -xr 0 -- \git branch --set-upstream-to=origin/master master
-            safe_execute -xr 0 -- \git commit -a -m .
+            safe_execute -xsr 0 -- \git remote add origin "$REPO_REMOTE" > /dev/null 2>&1
+            safe_execute -xsr 0 -- \git push -q origin master
+            safe_execute -xsr 0 -- \git branch --set-upstream-to=origin/master master
+            safe_execute -xsr 0 -- \git commit -a -m .
             assert/property-map has-remotes yes ahead-by 1
             assert/clean-status
         } always { popd }
@@ -279,18 +267,18 @@ unit_group "empty-no-remote-add" "Git repositories with one added file" test_sec
             assert/clean-status staged
             assert/repo-status unstaged new-paths test.txt new-len 1
 
-            safe_execute -xr 0 -- \git add "$REPO/test.txt"
+            safe_execute -xsr 0 -- \git add "$REPO/test.txt"
             assert/repo-status staged add-paths test.txt add-len 1
-            safe_execute -xr 0 -- \git fetch -q -a
-            safe_execute -xr 0 -- repo-details
+            safe_execute -xsr 0 -- \git fetch -q -a
+            safe_execute -xsr 0 -- repo-details
             assert/property-map has-commits 0 git-rev detached has-remotes no
 
             echo 'blah' > baz.txt
-            safe_execute -xr 0 -- \git add baz.txt
+            safe_execute -xsr 0 -- \git add baz.txt
             assert/repo-status staged add-paths 'baz.txt:test.txt' add-len 2
-            safe_execute -xr 0 -- \git commit -m 'baz.txt'
+            safe_execute -xsr 0 -- \git commit -m 'baz.txt'
             assert/property-map has-commits 1 has-remotes no
-            safe_execute -xr 0 -- repo-details
+            safe_execute -xsr 0 -- repo-details
 
             assert/property-map has-remotes no
 
@@ -325,51 +313,51 @@ unit_group "remote-ahead-behind" "Two repositories, various ahead/behind"  test_
             repo-details:locals
 
             print -- '$#/usr/bin/env zsh' > test.txt
-            safe_execute -xr 0 -- \git remote add origin "$REPO_REMOTE"
-            safe_execute -xr 0 -- \git add .
-            safe_execute -xr 0 -- \git commit -m 'Two repositories, various ahead/behind - first commit'
-            safe_execute -xr 0 -- \git push -q --set-upstream origin master
-            safe_execute -xr 0 -- \git branch -q --set-upstream-to=origin/master master
+            safe_execute -xsr 0 -- \git remote add origin "$REPO_REMOTE"
+            safe_execute -xsr 0 -- \git add .
+            safe_execute -xsr 0 -- \git commit -m 'Two repositories, various ahead/behind - first commit'
+            safe_execute -xsr 0 -- \git push -q --set-upstream origin master
+            safe_execute -xsr 0 -- \git branch -q --set-upstream-to=origin/master master
 
             pushd "$REPO_ALT"
             {
-                safe_execute -x -r 0 repo-details
+                safe_execute -xsr 0 repo-details
                 assert/property-map git-rev detached has-remotes no has-commits 0
-                safe_execute -x -r 0 -- \git checkout --no-progress -qfB master
+                safe_execute -xsr 0 -- \git checkout --no-progress -qfB master
                 assert/property-map git-rev detached has-commits 0 has-remotes no
                 assert/clean-status
 
-                safe_execute -xr 0 -- \git remote add origin "$REPO_REMOTE" > /dev/null 2>&1
-                safe_execute -xr 0 -- \git checkout -q -b master;
-                safe_execute -xr 0 -- \git pull -q origin master
-                safe_execute -xr 0 -- \git branch --set-upstream-to=origin/master master
-                safe_execute -xr 0 \git fetch -q
-                safe_execute -xr 0 repo-details
+                safe_execute -xsr 0 -- \git remote add origin "$REPO_REMOTE" > /dev/null 2>&1
+                safe_execute -xsr 0 -- \git checkout -q -b master;
+                safe_execute -xsr 0 -- \git pull -q origin master
+                safe_execute -xsr 0 -- \git branch --set-upstream-to=origin/master master
+                safe_execute -xsr 0 \git fetch -q
+                safe_execute -xsr 0 repo-details
 
                 assert/property-map ahead-by 0 behind-by 0
                 assert/clean-status
 
-                safe_execute -xr 0 -- add-commit boo.txt
-                safe_execute -xr 0 -- repo-details
+                safe_execute -xsr 0 -- add-commit boo.txt
+                safe_execute -xsr 0 -- repo-details
                 assert/property-map ahead-by 1
             } always { popd }
 
             echo 'blah' > bar.txt
-            safe_execute -xr 0 -- \git add .
-            safe_execute -xr 0 -- \git commit -m 'bar.txt'
-            safe_execute -xr 0 -- \git push -q
+            safe_execute -xsr 0 -- \git add .
+            safe_execute -xsr 0 -- \git commit -m 'bar.txt'
+            safe_execute -xsr 0 -- \git push -q
 
             pushd "$REPO_ALT"
             {
-                safe_execute -xr 0 -- \git fetch -q
-                safe_execute -xr 0 -- repo-details
+                safe_execute -xsr 0 -- \git fetch -q
+                safe_execute -xsr 0 -- repo-details
                 assert/property-map ahead-by 1 behind-by 1
 
-                safe_execute -xr 0 -- \git pull -q
-                safe_execute -xr 0 -- repo-details
+                safe_execute -xsr 0 -- \git pull -q
+                safe_execute -xsr 0 -- repo-details
                 assert/property-map ahead-by 2 behind-by 0
 
-                safe_execute -xr 0 -- \git push -q
+                safe_execute -xsr 0 -- \git push -q
             } always { popd }
         } always { popd }
     } always { reset_test_repos }

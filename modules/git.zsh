@@ -7,66 +7,64 @@ git-revparse-target() {
         \git rev-parse "$@" 2>/dev/null
     } always { [[ "$1" == "$OCWD" ]] || popd }
 }
-is-git-repository() { git-revparse-target "${1:-$PWD}" --is-insider-work-tree }
+is-git-repository() { \git rev-parse --is-inside-work-tree 2>/dev/null }
 
-local ___AR="git_reomtes=( ) git_status=( )" ___AS="git_property_map=( ) repo_status_unstaged=( ) repo_status_staged=( ) repo_submodules=( ) repo_subtrees"
+(( ${+gitrp_safeparms} == 1 )) || local -ar gitrp_safeparms=(
+    --show-toplevel
+    --git-dir
+    --is-bare-repository
+    --show-superproject-working-tree
+)
+# NOTE: --show-superproject-working-tree This must be last; it returns nothing (not even a blank line) when there's no submodule
+
+local ___AR="repo_remotes=( ) git_status=( )  repo_submodules=( )" ___AS="git_property_map=( ) repo_status_unstaged=( ) repo_status_staged=( ) repo_subtrees=( ) repo_submodule_branches=( )"
 alias repo-details:locals="local -a ${___AR}; local -A ${___AS}; local REPO_ABSOLUTE_ROOT=''"
-alias repo-details:globals="typeset -ga ${___AR}; typeset -gA ${___AS}; typeset -g REPO_ABSOLUTE_ROOT=''"
-unset ___A{R,S};
+alias repo-details:globals="typeset -gxa ${___AR}; typeset -gxA ${___AS}; typeset -g REPO_ABSOLUTE_ROOT=''"
 
-is-submodule() {
-    1="${1:-$PWD}"
-    [[ -n "$1" ]] || return $?
-    2="$(git-revparse-target "$1" --git-dir)" || return $?
-    [[ "${2:h:t}" == "modules" ]]
-}
-
-git-repo-root() {
-    impl-repo-root() {
-        typeset -g REPO_ABSOLUTE_ROOT=''
-        is-git-repository || return 1
-        local -a parent_repos=( (../)#.git(N) )
-        parent_repos=( "${(@)${(@)parent_repos:A}%%/.git}" )
-        (( ${#parent_repos} > 0 )) || REPO_ABSOLUTE_ROOT="$PWD"
-        REPO_ABSOLUTE_ROOT=${${parent_repos[(r)${(l.${#${(o@)parent_repos//?/X}[1]}..?.)}]}:-$GIT_REPO_ROOT};
-    }
-    local TGT="${1:-$PWD}"
-    pushd "$TGT"
-    {
-        impl-repo-root || return 1
-    } always { popd }
-}
-repo-discover() {
-
+repo-details() {
+    repo-details:globals
 
     is-git-repository || return $?
 
-    [[ -d ".git" ]]
-}
-repo-details() {
     get-gitcommands() {
         \git remote -v 2>/dev/null || { return 1 }
         print -- '--'
-        \git rev-parse HEAD --show-toplevel 2>/dev/null || {
-            print -- 'detached'
-            git rev-parse --show-toplevel 2>/dev/null || {
-                print -- 'not initialized'
-                return 1
-            }
+        \git rev-parse HEAD 2>/dev/null || print detached
+        \git rev-parse "${gitrp_safeparms[@]}" 2>/dev/null || {
+            print -- 'not initialized'
+            return 1
         }
-        print -- $'--\n--'
+        print -- $'--'
+        \git submodule --quiet foreach 'git rev-parse --show-toplevel --abbrev-ref HEAD'
+        print -- $'--'
+        # \git submodule --quiet foreach 'git rev-parse --symbolic --branches'
         \git status --porcelain -b 2>/dev/null
     }
 
+    store-array-slice() {
+        (( $# >= 1 )) || { print -- "$0: Invalid Usage"; exit 1 }
+        local __AR_NAME="$1"; shift
+        (( $# == 0 )) && set -A "$__AR_NAME" || set -A "$__AR_NAME" "${(@)${(@)argv[1,$(( ${argv[(i)--]} - 1 ))]}[@]}"
+        shift $(( ${#${(P@)__AR_NAME}} + 1 ))
+        typeset -ga new_argv=( "$@" )
+    }
+    local -a git_remotes=( ) git_props=( ) submod_result=( ) git_submodule_branches=( )
     () {
-        # typeset -ga git_output=( "$@" ) # TODO: Comment this out ... it's debug
-        typeset -gxa git_remotes=( "${(@)${(@)argv[1,$(( ${argv[(i)--]} - 1 ))]}[@]}" )
-        shift $(( ${#git_remotes[@]} + 1 ))
-        [[ "$2" != detached ]] || shift
-        typeset -gxa git_props=( "${(@)${(@)argv[1,$(( ${argv[(i)--]} - 1 ))]}[@]}" )
-        shift $(( ${#git_props[@]} + 2 ))
+
+        local -a new_argv=( )
+        [[ "${argv[1]}" == '--' ]] && { shift; typeset -gxa git_remotes=( ) } || {
+            store-array-slice git_remotes "$@"; argv=( "${new_argv[@]}" )
+        }
+        [[ "${argv[1]}" == '--' ]] && { shift; typeset -gxa git_props=( ) } || {
+            [[ "${argv[1]}" != 'HEAD' ]] || shift
+            store-array-slice git_props "$@"; argv=( "${new_argv[@]}" )
+        }
+        [[ "${argv[1]}" == '--' ]] && { shift; typeset -gxa submod_result=( ) } || {
+            store-array-slice submod_result "$@"; argv=( "${new_argv[@]}" )
+        }
         typeset -gxa git_status=( "$@" )
-    } "${(f)$(get-gitcommands)}"
+
+    } "${${(f)$(get-gitcommands)}[@]}"
     (( $? == 0 )) || return 1
 
     local -r REPO_CONFIG="${${(M)git_status[@]:#\#*}##\#\# }"
@@ -81,12 +79,21 @@ repo-details() {
         has-remotes   "${${${(M)${#git_remotes[@]}:#0}:+no}:-yes}"
         ahead-by      "${${${(M)REPO_CONFIG:#*\[ahead*}:+${${REPO_CONFIG##*\[ahead[[:space:]]}%%[\],]*}}:-0}"
         behind-by     "${${${(M)REPO_CONFIG:#*(\[|, )behind*}:+${${REPO_CONFIG##*(\[|, )behind[[:space:]]}%%[\],]*}}:-0}"
+        git-dir       "${${${git_props[3]}:A}##${git_props[2]}/}"
+        is-bare       "${${${(M)${git_props[4]}:#true}:+1}:-0}"
+        parent-repo   "${git_props[5]:-}"
+        is-submodule  0
     )
-    # print -- "'$REPO_CONFIG' // '${${${${(M)REPO_CONFIG:#* on *}:+[none]}:-${REPO_CONFIG##*...}}%%[[:space:]\[]*}'" > /dev/tty
-    [[ "${prop_map[local-branch]}" != "${prop_map[remote-branch]}" ]] || prop_map[remote-branch]=''
-    # print -- "'$REPO_CONFIG' // '${${${(M)REPO_CONFIG:#*(\[|, )behind*}:+${${REPO_CONFIG##*(\[|, )behind[[:space:]]}%%[\],]*}}:-0}' /:/ ${${${(M)REPO_CONFIG:#*\[ahead*}:+${${REPO_CONFIG##*\[ahead[[:space:]]}%%[\],]*}}:-0}" > /dev/tty
-    # print -- "'$REPO_CONFIG' // '${${${(M)REPO_CONFIG:#*\[ahead*}:+${${REPO_CONFIG##*\[ahead[[:space:]]}%%\]}}:-0}'" > /dev/tty
+    [[ "${${prop_map[git-dir]}:h:t}" != "modules" ]] || {
+        prop_map[is-submodule]=1
+    }
 
+    [[ "${prop_map[local-branch]}" != "${prop_map[remote-branch]}" ]] || prop_map[remote-branch]=''
+
+    [[ -z "${submod_result}" ]] || {
+        typeset -ga repo_submodules=( "${${(M@)submod_result[@]:#/*}[@]##${prop_map[nearest-root]}/}" )
+        typeset -gA repo_submodule_branches=( "${submod_result[@]}" )
+    }
 
     typeset -ga u_ren=( ${(@)${(M)git_status:#([AMDR ]R *)}##???} )  \
              u_mod=( ${(@)${(M)git_status:#([AMDR ]M *)}##???} )     \
@@ -102,10 +109,10 @@ repo-details() {
     for RP in u_{ren,mod,add,del,new}; do repo_status_unstaged+=( "${RP##u_}-paths"  "${(j.:.)${(q@)${(P@)RP}}}" "${RP##u_}-len" ${#${(P@)RP}} ); done
     for RP in s_{ren,mod,add,del}; do repo_status_staged+=( "${RP##s_}-paths"  "${(j.:.)${(q@)${(P@)RP}}}" "${RP##s_}-len" ${#${(P@)RP}} ); done
 
-    ___A=" %F{$PLIB_GIT_TRACKED_COLOR}${PLIB_GIT_MOD_SYM}%f"
-    ____F="${${(M)repo_status_unstaged[mod-len]:#[123456789]*}:+$___A}"
     typeset -gA git_property_map=( "${(kv)prop_map[@]}" )
+
     if [[ "${git_property_map[remote-branch]}" == '[none]' ]]; then git_property_map[remote-branch]=''; fi
+
 }
 
 plib_is_git() print -n -- ${${$(\git branch 2>/dev/null):+1}:-0}
@@ -198,4 +205,3 @@ plib_git_commit_since(){
 plib_is_git_rebasing(){
     [[ $(ls `git rev-parse --git-dir` | grep rebase-apply) ]] && echo -ne 1 || echo -ne 0
 }
-

@@ -29,10 +29,10 @@ __ut/fail_diff_string() {
     local ACTUAL="`__ut/escape_ans "$1"`"
     local EXPECTED="`__ut/escape_ans "$2"`"
     set +x
-    peno() print -n -- $'\e[0m\e[1;91m'"$1"
-    pgno() print -n -- $'\e[0m\e[1;97m'"$1"
-    pe() print -- $'\e[0m\e[1;91m\t\t'"$1""$CLR_RST"
-    pg() print -- $'\e[0m\e[1;92m\t\t'"$1""$CLR_RST"
+    peno() { print -n -- $'\e[0m\e[1;91m'"$1" }
+    pgno() { print -n -- $'\e[0m\e[1;97m'"$1" }
+    pe()   { print -- $'\e[0m\e[1;91m\t\t'"$1""$CLR_RST" }
+    pg()   { print -- $'\e[0m\e[1;92m\t\t'"$1""$CLR_RST" }
 
     __print_fail $'Expected string did not match\n'
     (( ${#EXPECTED} != 0 )) || pe $'String was expected to be empty'
@@ -144,7 +144,7 @@ __print_fail() > /dev/tty {
     local -a ltrace=( "${${funcfiletrace[@]:$_x}[@]##*:}" )
     local -a tracear=( "${(@A)${${funcfiletrace[@]:$_x}[@]%:*}:^^ltrace}" )
     print -n -- $'\e[0;91m           in   '
-    printf $'\e[4;96m%s\e[0;1;90m:\e[1;96m%s ' "${tracear[@]##$PROJECT_DIR/}"
+    printf $'\e[4;96m%s\e[0;1;90m:\e[1;96m%s ' "${tracear[@]##$PROJECT_DIR/}" && print
     #print $'\e[4;96m${funcfiletrace[$_x]%%:*}\e[0;1;90m:\e[1;96m${funcfiletrace[$_x]##*:}'
 }
 __info() > /dev/tty {
@@ -157,19 +157,15 @@ __fail() > /dev/tty {
 }
 __dump_array_value() {
     local clr="$1"
-    _b() echo -en "\e[1;9${clr}m$1"
-    _u() echo -en "\e[4;9${clr}m$1"
-    _n() echo -en "\e[0;3${clr}m$1"
+    _b() { echo -en "\e[1;9${clr}m$1" }
+    _u() { echo -en "\e[4;9${clr}m$1" }
+    _n() { echo -en "\e[0;3${clr}m$1" }
     _b "      $2"; _n "='"; _u "$3"; _n "'\e[0;37m\e[0m\n"
 }
 __dump_array() {
     local -i color=$1; shift
     local -a ixs; ixs=( {1..$#} )
     printf "      \033[1;9${color}m%s\e[1;3${color}m=\e[4;9${color}m%s\e[0;3${color}m\n" "${ixs[@]:^argv}"
-    #while [[ $# -ne 0 ]]; do
-    #    __dump_array_value $color $i "$1"
-    #    (( i++ )) && shift
-    #done
 }
 __dump_assoc() {
 
@@ -427,7 +423,6 @@ __ut/debug_maps() {
 alias __ut:debug_maps='local -a call_stack=( ) call_relative_lines=( ) call_source_files=( ) call_source_lines=( ) call_source_lines_code=( ); local -A call_func_line_map=( ) call_file_line_map=( ) call_file_map=( ) call_fn_line_map=( ); __ut/debug_maps'
 
 __ut/debug_call_details() {
-    #set -x
     create-from-ix() {
         local DAMMIT="${funcsourcetrace[$1]}"
         local SOURCE_FILE="${${:-${TEST_LIB_PATH}/${funcfiletrace[$1]%%:*}}:A}" FNTRACE="${functrace[$1]}"
@@ -634,11 +629,11 @@ function safe_execute {
 
     function str/contains { [[ "${1%%${2-}*}" != "$1" ]]; }
 
-    local -i {OPTIND,SKIP_SUBSHELL,NO_CLIP}=0 EXPECTED_RC=-1
+    local -i {OPTIND,SKIP_SUBSHELL,NO_CLIP,IS_SILENT}=0 EXPECTED_RC=-1
     local REFVAR_FROM_CLI='' EXPECTED_REFVAR_VALUE='' RV_TYPE='' TARGET_PATH=''
     local -a typeset_refvar_from_cli=( "local" '' '' )
 
-    while getopts xcr:o:e:v:p: OPT; do
+    while getopts xscr:o:e:v:p: OPT; do
         case "$OPT" in
             (r) EXPECTED_RC="$OPTARG" ;;
             (o) [[ "$OPTARG" == *$'\n'* ]] && expected_stdout=( "${(@f)OPTARG}" ) || expected_stdout=( "$OPTARG" ) ;;
@@ -646,10 +641,12 @@ function safe_execute {
             (v) EXPECTED_REFVAR_VALUE="$OPTARG" ;;
             (x) SKIP_SUBSHELL=1 ;;
             (p) TARGET_PATH="$OPTARG";  [[ -d "$OPTARG" ]] || __fail "Path $OPTARG does not exist (set as target path for $0)" ;;
-            (c) NO_CLIP=1
+            (c) NO_CLIP=1   ;;
+            (s) IS_SILENT=0 ;;
         esac
     done
     (( OPTIND > 1 )) && shift $(( OPTIND - 1 ))
+
     if (( ${argv[(i)-v]} <= ${#argv[@]} )); then
         REFVAR_FROM_CLI="${argv[$(( ${argv[(i)-v]}  + 1))]}"
         typeset_refvar_from_cli[3]="$REFVAR_FROM_CLI"
@@ -677,9 +674,10 @@ function safe_execute {
 
     apply_temporary_runtime_vals() {
         while (( $# > 0 )); do
-            org_vals+=( "$1" "${(P)1}" ); print -nv $1 -- "${new_vals[$1]}"
-            shift
+            org_vals+=( "$1" "${(P)1}" )
+            print -nv $1 -- "${new_vals[$1]}" && shift
         done
+        [[ -z "$TARGET_PATH" ]] || { [[ -d "$TARGET_PATH" ]] && pushd "$TARGET_PATH" || __fail "Cannot change directory to $TARGET_PATH for safe_execute" }
     }
     restore_runtime_vals() { for KEY in ${(k)new_vals[@]}; do print -nv $KEY -- "${org_vals[$KEY]}"; done; }
 
@@ -702,22 +700,17 @@ function safe_execute {
             echo "${(F)${(P)REFVAR_FROM_CLI}}" > "$VAROUT"
         }
         {
-            [[ -z "$TARGET_PATH" ]] || pushd "$TARGET_PATH"
-            {
-                if (( SKIP_SUBSHELL )); then
-                    "${last_executed[@]}" > "$TSTDOUT" 2> "$TSTDERR"; RC=$?
+            if (( SKIP_SUBSHELL )); then
+                "${last_executed[@]}" > "$TSTDOUT" 2> "$TSTDERR"; RC=$?
+            else
+                if [[ -n "$EXPECTED_REFVAR_VALUE" ]]; then
+                    ( subshell_var_capture ); RC=$?; ACTUAL_REFVAR_VALUE="$(<$VAROUT)"
                 else
-                    if [[ -n "$EXPECTED_REFVAR_VALUE" ]]; then
-                        ( subshell_var_capture ); RC=$?; ACTUAL_REFVAR_VALUE="$(<$VAROUT)"
-                    else
-                        ( "${last_executed[@]}" > "$TSTDOUT" 2> "$TSTDERR" ); RC=$?
-                    fi
-                    std_err=( "${(f@)$(<$TSTDERR)}" )
+                    ( "${last_executed[@]}" > "$TSTDOUT" 2> "$TSTDERR" ); RC=$?
                 fi
-                std_out=( "${(f@)$(<$TSTDOUT)}" )
-            } always {
-                [[ -z "$TARGET_PATH" ]] || popd
-            }
+                std_err=( "${(f@)$(<$TSTDERR)}" )
+            fi
+            std_out=( "${(f@)$(<$TSTDOUT)}" )
         } always { restore_runtime_vals }
     } always {
         rm "$TSTDOUT"
@@ -726,7 +719,10 @@ function safe_execute {
     }
     local CALLNAME="${last_executed[1]}"
     local CLISTR="${${(j<\e[0m \e[0;37m>)last_executed[@]}#* }"
+
+    # Check the outcome
     (( EXPECTED_RC == -1 )) || {
+        #set -x
         if (( EXPECTED_RC != RC )); then
             __failmark; print --     $'\e[0;37mCommandline     : \e[1;4;35m'"$CALLNAME"$'\e[0m \e[0;4;37m'"$CLISTR"
             print -- $'                \e[0;37mTarget Directory: \e[1;97m'"${TARGET_PATH:-$PWD}"
@@ -743,9 +739,10 @@ function safe_execute {
                 print -- $'                \e[0;4;37mProgram produced no output\e[0m'
             fi
             __fail "Expected return code of '$EXPECTED_RC'; got '$RC'"
-        else
+        elif (( $IS_SILENT == 0 )); then
             () { return $RC }; assert/return "${(j< >)last_executed[@]}" "$EXPECTED_RC"
         fi
+        #set +x
     }
     [[ -z "$EXPECTED_REFVAR_VALUE" ]] || {
         assert/$RV_TYPE ACTUAL_REFVAR_VALUE is-equal-to "${EXPECTED_REFVAR_VALUE}"
@@ -777,4 +774,3 @@ function safe_execute {
 
 alias -g test_sections='|| ()'
 unit_group() { [[ "${___test_arg:-${1:-}}" == "$1" ]] && print_section "Group: $2"; [[ "${___test_arg:-${1:-}}" != "$1" ]] }
-
